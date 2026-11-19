@@ -87,5 +87,6 @@ test("devUserForDevelopment", () => {
   // Without a secret, a new one at every start.
   expect(s.secret.length).toBeGreaterThanOrEqual(32);
   expect(signInFromEnv({ TEST_DEV_USER: "dev@example.com" }, opts()).secret).not.toBe(s.secret);
-  expect(logs).toEqual(['warning: TEST_DEV_USER is set, everyone reaching the app is "dev@example.com"']);
+  // The address stays out of the log.
+  expect(logs).toEqual(["warning: TEST_DEV_USER is set, so everyone reaching the app is signed in as that person without a password"]);
 });

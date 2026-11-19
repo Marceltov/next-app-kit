@@ -464,7 +464,8 @@ export function signInFromEnv(env: Env, opts: { prefix: string; file: string; ap
     .map((e) => e.trim().toLowerCase())
     .filter(Boolean);
   if (allowed.length === 0 && !dev) log(`warning: ${P}_ALLOWED_EMAILS is empty, so nobody can sign in`);
-  if (dev) log(`warning: ${P}_DEV_USER is set, everyone reaching the app is "${dev}"`);
+  // Not the address itself: logs hold no email address.
+  if (dev) log(`warning: ${P}_DEV_USER is set, so everyone reaching the app is signed in as that person without a password`);
   return {
     prefix: P,
     appName,
