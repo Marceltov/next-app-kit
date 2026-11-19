@@ -16,6 +16,10 @@ npm install https://github.com/Marceltov/next-app-kit/archive/refs/tags/vX.Y.Z.t
 
 Better Auth and its plugins, the MCP SDK, better-sqlite3, kysely, zod, nodemailer and (for `next-app-kit/next` only) Next.js are peer dependencies at exact versions. An app installs the same versions; upgrading one of them alone fails the install instead of running two copies. They are upgraded here first, then in the apps, together.
 
+## Migrations
+
+Apps keep their migration list in `backend/db/migrations.ts` and run it with the kit's `migrate` from `next-app-kit/migrations`.
+
 ## License
 
 [Apache-2.0](LICENSE).

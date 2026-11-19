@@ -23,6 +23,7 @@ Dependabot (`.github/dependabot.yml`) opens weekly grouped bumps; patch and mino
 
 - One entry point per part (`next-app-kit/signin`, `/tokens`, `/mcp`, `/rest`, `/multipart`, `/migrations`, `/next`, `/testing`), each `src/<part>/index.ts` built to `dist/<part>/index.js`; a part's `exports` entry is added with the part (`src/package.test.ts` checks every entry has a built file).
 - Framework-free core: only `src/next/` imports Next.js (`eslint.config.mjs`, pinned by `src/boundary.test.ts`).
+- Migrations: the kit holds the runner (`migrate`); apps keep their list in `backend/db/migrations.ts` and run it with `migrate`.
 - No app domain: an app passes its env prefix, token prefix, tools, operations and `log`.
 
 ## Rules
