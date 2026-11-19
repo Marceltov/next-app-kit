@@ -3,7 +3,8 @@
 // client, and records say so: "<email> via <client>". Checked at every request, not only when a token is issued: the origin, the token
 // (signature, issuer, audience, expiry), that the person still exists with their address on the allowlist, and that they still allow the
 // client. An API token, a token for /api/v1 and a session cookie are no such token. Where this differs from noticebox: the base URL is
-// always the configured PUBLIC_URL (never taken from request headers), and a person taken off the allowlist is refused.
+// always the configured PUBLIC_URL (never taken from request headers), and a person taken off the allowlist is refused. A tool that throws
+// is answered as a tool error saying only "internal error": what it threw (a path, a query, a stack) is for the app's log, not the client.
 import { requireMcpAuth } from "@better-auth/mcp";
 import { McpServer, createMcpHandler, type AuthInfo, type CallToolResult } from "@modelcontextprotocol/server";
 import type { Auth, SignInSettings } from "../signin/accounts.js";
@@ -18,6 +19,8 @@ export type McpContext = {
   tools: Tool[];
   serverInfo: { name: string; version: string };
   instructions: string;
+  /** The app's log (pino in an app): a tool that throws is logged here as `mcp <tool>: <message>`. */
+  log: (line: string) => void;
 };
 
 /** The MCP protocol version the endpoint speaks. */
@@ -30,7 +33,13 @@ function serverFor(ctx: McpContext, who: Who): McpServer {
       t.name,
       { description: t.description, inputSchema: t.inputSchema, outputSchema: t.outputSchema, annotations: t.annotations },
       async (input: unknown): Promise<CallToolResult> => {
-        const r = await t.run(input, who);
+        let r: Awaited<ReturnType<Tool["run"]>>;
+        try {
+          r = await t.run(input, who);
+        } catch (e) {
+          ctx.log(`mcp ${t.name}: ${e instanceof Error ? e.message : String(e)}`);
+          return { isError: true, content: [{ type: "text", text: "internal error" }] };
+        }
         const refused = refusalOf(r);
         if (refused !== null) return { isError: true, content: [{ type: "text", text: refused }] };
         return { structuredContent: r, content: [{ type: "text", text: JSON.stringify(r) }] };

@@ -110,7 +110,7 @@ test("callTool runs a tool as someone, through the MCP server, without a token",
     output: z.object({ actor: z.string() }),
     handle: async (_input, who) => ({ actor: who.actor, guidance: ["Nothing else to do."] }),
   });
-  const ctx: McpContext = { auth, signIn, tools: [whoami], serverInfo: { name: "t", version: "0" }, instructions: "" };
+  const ctx: McpContext = { auth, signIn, tools: [whoami], serverInfo: { name: "t", version: "0" }, instructions: "", log: () => {} };
   const who: Who = { actor: "ada@example.com via Tests", person: "p1", clientId: "c1", base: signIn.baseUrl };
   expect((await callTool(ctx, who, "whoami", {})).structuredContent).toEqual({ actor: "ada@example.com via Tests", guidance: ["Nothing else to do."] });
 });

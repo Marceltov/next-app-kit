@@ -61,7 +61,7 @@ export function wellKnownHandlers(getAuth: Getter<Auth>): { authorizationServer:
 
 const notAllowed: Handler = async () => new Response(null, { status: 405, headers: { Allow: "POST" } });
 
-/** app/mcp/route.ts: MCP over Streamable HTTP is POST only; there is no server-sent stream or session to GET or DELETE. */
+/** app/mcp/route.ts: MCP over Streamable HTTP is POST only; there is no server-sent stream or session to GET or DELETE. The context's `log` gets the tools' failures. */
 export function mcpHandler(getCtx: Getter<McpContext>): { POST: Handler; GET: Handler; DELETE: Handler } {
   const ctx = once(getCtx);
   return { POST: async (req) => mcpRoute(req, await ctx()), GET: notAllowed, DELETE: notAllowed };

@@ -38,7 +38,7 @@ let rest: RestApp<null>;
 
 beforeAll(async () => {
   h = await startHarness(["ada@example.com"]);
-  mcp = { auth: h.auth, signIn: h.settings, tools: [greet], serverInfo: { name: "t", version: "0.0.1" }, instructions: "A test app." };
+  mcp = { auth: h.auth, signIn: h.settings, tools: [greet], serverInfo: { name: "t", version: "0.0.1" }, instructions: "A test app.", log: () => {} };
   rest = { auth: h.auth, signIn: h.settings, ops: OPS, ctx: null, log: () => {}, openApi: { title: "Test API", version: "0.0.1" } };
 });
 

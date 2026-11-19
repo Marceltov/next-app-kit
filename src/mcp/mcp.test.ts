@@ -37,10 +37,18 @@ const echo = defineTool({
 
 let h: Harness;
 let ctx: McpContext;
+const logged: string[] = [];
 
 beforeAll(async () => {
   h = await startHarness(["ada@example.com", "anna@example.com", "leaver@example.com", "gone@example.com"]);
-  ctx = { auth: h.auth, signIn: h.settings, tools: [whoami, echo], serverInfo: { name: "test-app", version: "0.0.1" }, instructions: "A test app." };
+  ctx = {
+    auth: h.auth,
+    signIn: h.settings,
+    tools: [whoami, echo],
+    serverInfo: { name: "test-app", version: "0.0.1" },
+    instructions: "A test app.",
+    log: (line) => void logged.push(line),
+  };
 });
 
 afterAll(async () => {
@@ -234,6 +242,32 @@ test("toolWithoutGuidanceRejected", async () => {
     handle: async () => ({ guidance: [1] as unknown as string[] }),
   });
   await expect(odd.run({}, who)).rejects.toThrow("odd: a result needs guidance: string[]");
+});
+
+test("toolErrorLoggedNotLeaked", async () => {
+  const boom = defineTool({
+    name: "boom",
+    description: "Throws.",
+    input: z.object({}),
+    output: z.object({}),
+    handle: async () => {
+      throw new Error("SQLITE_CORRUPT at /data/secret.sqlite");
+    },
+  });
+  const ada = await client();
+  const withBoom: McpContext = { ...ctx, tools: [boom, ...ctx.tools] };
+  logged.length = 0;
+  const r = await rpc("tools/call", { name: "boom", arguments: {} }, ada.auth, withBoom);
+  expect(r.status).toBe(200);
+  const result = ((await r.json()) as { result: Result }).result;
+  // The client learns only that it failed; the log holds why, once, naming the tool.
+  expect(result.isError).toBe(true);
+  expect(result.content).toEqual([{ type: "text", text: "internal error" }]);
+  expect(logged).toEqual(["mcp boom: SQLITE_CORRUPT at /data/secret.sqlite"]);
+  // A refusal is no error: its message reaches the client and nothing is logged.
+  logged.length = 0;
+  expect((await ada.call("echo", { text: "" })).result!.content[0]!.text).toBe("nothing to say");
+  expect(logged).toEqual([]);
 });
 
 test("callToolRunsAsWho", async () => {

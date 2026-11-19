@@ -44,7 +44,7 @@ An app passes its prefix (`UPLOAD`, `NOTICEBOX`, …) and the kit reads only `<P
 
 [`examples/minimal`](examples/minimal) is the smallest app on the kit; copy from it:
 
-1. `backend/app.ts`: the runtime. `signInFromEnv` with the app's prefix, `openAuth` with the API token prefix and the sign-in mail's texts, the tools (`defineTool`) and the operations that mirror them (`Op`), the `log` function (pino in an app), all opened once at the first request.
+1. `backend/app.ts`: the runtime. `signInFromEnv` with the app's prefix, `openAuth` with the API token prefix and the sign-in mail's texts, the tools (`defineTool`) and the operations that mirror them (`Op`), the `log` function (pino in an app), all opened once at the first request. The MCP context (`McpContext`) and the REST app (`RestApp`) both take `log`: a tool that throws is logged as `mcp <tool>: <message>` and its client gets only `internal error` (a `refuse(…)` is no error: its message reaches the client and nothing is logged).
 2. The route files in [Route files](#route-files), one line each.
 3. The consent page and the auth client ([The consent page](#the-consent-page)), in the app's own words and styles. The sign-in page and the token page are the app's: the example shows who is signed in and makes a token (`app/page.tsx`, `TokenForm.tsx`, `actions.ts`) but has no sign-in page; `signInMethods` says what one offers.
 4. The test sign-in route and the Playwright setup (`app/api/test/sign-in/route.ts`, `playwright.config.ts`, `scripts/absent-in-production.ts`).

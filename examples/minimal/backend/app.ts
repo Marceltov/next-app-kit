@@ -45,7 +45,7 @@ async function open(): Promise<App> {
   });
   return {
     auth,
-    mcp: { auth, signIn, tools: [greet], serverInfo: { name: "minimal", version: "0.0.0" }, instructions: "Greets people." },
+    mcp: { auth, signIn, tools: [greet], serverInfo: { name: "minimal", version: "0.0.0" }, instructions: "Greets people.", log },
     rest: { auth, signIn, ops, ctx: null, log, openApi: { title: "Minimal API", version: "0.0.0" } },
   };
 }
