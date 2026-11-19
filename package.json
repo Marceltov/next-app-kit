@@ -29,6 +29,10 @@
     "./rest": {
       "types": "./dist/rest/index.d.ts",
       "default": "./dist/rest/index.js"
+    },
+    "./multipart": {
+      "types": "./dist/multipart/index.d.ts",
+      "default": "./dist/multipart/index.js"
     }
   },
   "files": [
@@ -79,6 +83,7 @@
     "@eslint/js": "^10.0.1",
     "@modelcontextprotocol/server": "2.4.0",
     "@types/better-sqlite3": "^9.6.0",
+    "@types/busboy": "1.5.5",
     "@types/node": "^26.6.6",
     "@types/nodemailer": "^8.0.2",
     "better-auth": "1.7.21",
@@ -93,5 +98,8 @@
     "typescript-eslint": "^8.73.0",
     "vitest": "^5.1.1",
     "zod": "4.6.7"
+  },
+  "dependencies": {
+    "busboy": "1.6.0"
   }
 }
