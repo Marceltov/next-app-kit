@@ -181,10 +181,19 @@ const jsonSchema = (s: z.ZodType, io: "input" | "output") => {
   return rest;
 };
 
-/** The OpenAPI 3.1 description of the table, served at /api/v1/openapi.json and committed by the app as openapi.json. */
+/**
+ * The OpenAPI 3.1 description of the table, served at /api/v1/openapi.json and committed by the app as openapi.json. Throws when an
+ * operation's path parameters (`{name}`) and its `params` are not the same names.
+ */
 export function openApiDocument<Ctx>(ops: Op<Ctx>[], info: OpenApiInfo & { serverUrl: string }): Record<string, unknown> {
   const paths: Record<string, Record<string, unknown>> = {};
   for (const o of ops) {
+    // The path's {params} and the declared ones are the same set: one left out of params would be undocumented, one params names that the
+    // path lacks never arrives.
+    const inPath = [...o.path.matchAll(/\{([^}]+)\}/g)].map((m) => m[1]!).sort();
+    const declared = Object.keys(o.params ?? {}).sort();
+    if (inPath.join(",") !== declared.join(","))
+      throw new Error(`${o.operationId}: the path's parameters {${inPath.join(", ")}} differ from params {${declared.join(", ")}}`);
     const parameters = [
       ...Object.entries(o.params ?? {}).map(([name, description]) => ({ name, in: "path", required: true, description, schema: { type: "string" } })),
       ...Object.entries((o.query?.shape ?? {}) as Record<string, z.ZodType>).map(([name, s]) => ({

@@ -5,7 +5,12 @@ import { emailAllowed, type Auth, type SignInSettings } from "./accounts.js";
 /** A signed-in person: Better Auth's user id, and the verified address the app shows and records. */
 export type Person = { id: string; email: string };
 
-/** The person behind a page request's session cookie; the dev user (<PREFIX>_DEV_USER, development only) when there is none. */
+/**
+ * The person behind a page request's session cookie; the dev user when there is none and the caller passes one. The kit doesn't read the
+ * dev user here: a page that honours <PREFIX>_DEV_USER passes `signIn.devUser` (signInFromEnv refuses it under NODE_ENV=production). The
+ * dev user is no Better Auth user: its id is `dev:<address>`, no row in auth.sqlite stands for it, so it can't make API tokens, add
+ * passkeys or allow MCP clients; it is for looking at pages in development, not for trying the token or OAuth flows.
+ */
 export async function personOf(h: Headers, auth: Auth, devUser?: string | null): Promise<Person | null> {
   const s = await auth.api.getSession({ headers: h });
   if (s) return { id: s.user.id, email: s.user.email };

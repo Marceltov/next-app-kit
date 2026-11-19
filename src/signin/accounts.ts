@@ -439,6 +439,8 @@ export function signInFromEnv(env: Env, opts: { prefix: string; file: string; ap
     secret,
     baseUrl,
     file,
+    // The app's own JWKS, over loopback: PORT must be the port the app listens on, or every /mcp call and every REST call with an OAuth
+    // token is refused (401) because the keys can't be fetched.
     jwksUrl: `http://127.0.0.1:${env.PORT || 3000}/api/auth/jwks`,
     allowed,
     providers,

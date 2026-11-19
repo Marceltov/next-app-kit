@@ -279,6 +279,21 @@ test("callToolRunsAsWho", async () => {
   expect(tools).toHaveLength(2);
 });
 
+test("inputIsAnObject: a tool's input schema is an object, as MCP's inputSchema must be", () => {
+  const scalar = () =>
+    defineTool({
+      name: "scalar",
+      description: "",
+      // @ts-expect-error an input that is not an object schema does not compile
+      input: z.string(),
+      output: z.object({}),
+      handle: async () => ({ guidance: [] }),
+    });
+  expect(scalar).toThrow("scalar: the input schema must be a z.object");
+  const tool: Tool = whoami;
+  expect(tool.inputSchema).toBeInstanceOf(z.ZodObject);
+});
+
 test("refusalOfAnythingElseIsNull", () => {
   expect(refusalOf(refuse("no"))).toBe("no");
   for (const r of [null, undefined, "no", 1, { guidance: [] }]) expect(refusalOf(r)).toBeNull();

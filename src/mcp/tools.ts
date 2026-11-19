@@ -25,7 +25,7 @@ export const refusalOf = (r: unknown): string | null => (typeof r === "object" &
 export type Tool = {
   name: string;
   description: string;
-  inputSchema: z.ZodType;
+  inputSchema: z.ZodObject;
   outputSchema: z.ZodObject;
   annotations?: ToolAnnotations;
   /** Runs the handler for `who` on an input the input schema has already parsed; throws if the result has no guidance. */
@@ -38,15 +38,19 @@ type Output<S extends z.ZodRawShape> = keyof S extends never ? object : z.output
 
 const hasGuidance = (r: Record<string, unknown>) => Array.isArray(r.guidance) && r.guidance.every((line) => typeof line === "string");
 
-/** Defines a tool. Its output schema must not declare `guidance` itself: the kit adds it. */
-export function defineTool<I, S extends z.ZodRawShape>(t: {
+/**
+ * Defines a tool. Its input schema is a `z.object` (MCP's inputSchema is an object's), and its output schema must not declare `guidance`
+ * itself: the kit adds it.
+ */
+export function defineTool<In extends z.ZodObject, S extends z.ZodRawShape>(t: {
   name: string;
   description: string;
-  input: z.ZodType<I>;
+  input: In;
   output: z.ZodObject<S>;
   annotations?: ToolAnnotations;
-  handle: (input: I, who: Who) => Promise<Guided<Output<S>> | Refused>;
+  handle: (input: z.output<In>, who: Who) => Promise<Guided<Output<S>> | Refused>;
 }): Tool {
+  if (!(t.input instanceof z.ZodObject)) throw new Error(`${t.name}: the input schema must be a z.object`);
   if ("guidance" in t.output.shape) throw new Error(`${t.name}: the output schema declares guidance; the kit adds it`);
   return {
     name: t.name,
@@ -55,7 +59,7 @@ export function defineTool<I, S extends z.ZodRawShape>(t: {
     outputSchema: t.output.extend({ guidance: z.array(z.string()) }),
     annotations: t.annotations,
     async run(input, who) {
-      const r = (await t.handle(input as I, who)) as Record<string, unknown>;
+      const r = (await t.handle(input as z.output<In>, who)) as Record<string, unknown>;
       if (refusalOf(r) === null && !hasGuidance(r)) throw new Error(`${t.name}: a result needs guidance: string[]`);
       return r as Guided<Record<string, unknown>> | Refused;
     },

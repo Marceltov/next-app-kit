@@ -25,9 +25,9 @@ updates:
       - dependency-name: typescript
         versions: [">=7"]
     groups:
-      # The peers that move together: an app pins the same exact versions, so they change in one pull request and one kit release.
+      # Every exact peer: an app pins the same exact versions, so they change in one pull request and one kit release.
       peers:
-        patterns: [better-auth, "@better-auth/*", "@modelcontextprotocol/server", next]
+        patterns: [better-auth, "@better-auth/*", "@modelcontextprotocol/server", next, zod, better-sqlite3, nodemailer, kysely]
       minor-and-patch:
         update-types: [minor, patch]
 

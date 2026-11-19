@@ -3,16 +3,19 @@
 // by default, at most 365, or none when chosen explicitly), is stored hashed by Better Auth's api-key plugin and shown once. A script may
 // instead hold an OAuth access token issued for /api/v1. Either way, an /mcp token is refused here, and an API token is refused on /mcp
 // (whose check takes only JWTs issued for /mcp). Where this differs from noticebox: the permission resource is `api` (API_TOKEN_RESOURCE),
-// the token prefix is the app's, and a token of a person whose address is no longer on the allowlist is refused.
+// the token prefix is the app's, and a token of a person whose address is no longer on the allowlist is refused. An OAuth token for /api/v1
+// stands on the person's consent as an /mcp token does: revoking the connection stops it at the next call, and its actor names the client
+// ("<email> via <client>").
 import { requestToResourceInput, verifyAccessTokenRequest } from "better-auth/oauth2";
 import { API_TOKEN_DAYS, API_TOKEN_RESOURCE, apiTokenPrefixOf, type Auth, type SignInSettings } from "../signin/accounts.js";
+import { clientName, connected } from "../mcp/connections.js";
 import { allowedPerson } from "../signin/person.js";
 
 export type Scope = "read" | "read+write";
 
 export type ApiToken = { id: string; name: string; scope: Scope; start: string; created_at: string; expires_at: string | null; last_used_at: string | null };
 
-/** A REST caller: the person's id, their address (what the app records as the actor), and what they may do here. */
+/** A REST caller: the person's id, what the app records as the actor (the address; "<email> via <client>" for an OAuth token), and what they may do here. */
 export type RestCaller = { person: string; actor: string; scope: Scope };
 
 export type Outcome = { ok: true } | { ok: false; error: string };
@@ -98,13 +101,15 @@ const bearerOf = (h: Headers): string => h.get("authorization")?.match(/^Bearer\
 
 /**
  * Who a REST request is: an API token (checked, expiry and all, and its last use recorded), or an OAuth access token this instance issued
- * for /api/v1 (signature, issuer, audience, expiry). Null for anything else, an /mcp token and a session cookie included. The person must
- * still exist with their address on the allowlist.
+ * for /api/v1 (signature, issuer, audience, expiry) whose client the person still allows. Null for anything else, an /mcp token and a
+ * session cookie included. The person must still exist with their address on the allowlist. An API token's actor is the address; an OAuth
+ * token's is "<email> via <client>".
  */
 export async function restCaller(req: Request, auth: Auth, signIn: SignInSettings): Promise<RestCaller | null> {
   const token = bearerOf(req.headers);
   if (!token) return null;
   let person: string | null;
+  let client: string | null = null;
   let scope: Scope = "read+write";
   if (token.startsWith(apiTokenPrefixOf(auth))) {
     const r = (await auth.api.verifyApiKey({ body: { key: token } }).catch(() => null)) as { valid: boolean; key: Row | null } | null;
@@ -118,11 +123,16 @@ export async function restCaller(req: Request, auth: Auth, signIn: SignInSetting
         jwksUrl: signIn.jwksUrl,
       });
       person = typeof claims.sub === "string" ? claims.sub : null;
+      client = typeof claims.azp === "string" ? claims.azp : typeof claims.client_id === "string" ? claims.client_id : null;
+      if (!client) return null;
     } catch {
       return null;
     }
   }
   if (!person) return null;
   const who = await allowedPerson(signIn, auth, person);
-  return who ? { person: who.id, actor: who.email, scope } : null;
+  if (!who) return null;
+  if (client === null) return { person: who.id, actor: who.email, scope };
+  if (!(await connected(auth, person, client))) return null;
+  return { person: who.id, actor: `${who.email} via ${await clientName(auth, client)}`, scope };
 }

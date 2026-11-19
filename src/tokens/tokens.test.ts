@@ -6,6 +6,7 @@ import { requireMcpAuth } from "@better-auth/mcp";
 import { afterAll, beforeAll, expect, test } from "vitest";
 import { personOf } from "../signin/person.js";
 import { API_TOKEN_PREFIX, cookieOf, oauthFor, signIn, startHarness, type Harness } from "../signin/testing.js";
+import { connections, revokeConnection } from "../mcp/connections.js";
 import { createApiToken, listApiTokens, revokeApiToken, restCaller, type Scope } from "./index.js";
 
 let h: Harness;
@@ -116,7 +117,8 @@ test("apiTokenRefusedOnMcp", async () => {
 test("mcpTokenRefusedOnRest", async () => {
   // An OAuth access token issued for /api/v1 is a REST caller, with the person's full rights; one for /mcp is not.
   const forApi = await oauthFor(h, `${h.base}/api/v1`, "ada@example.com", { resources: [`${h.base}/api/v1`] });
-  expect(await callerOf(forApi.tokens.access_token)).toEqual({ person: me, actor: "ada@example.com", scope: "read+write" });
+  // Its actor names the client too, as /mcp's do: records say "<email> via <client>".
+  expect(await callerOf(forApi.tokens.access_token)).toEqual({ person: me, actor: "ada@example.com via Claude", scope: "read+write" });
   const forMcp = await oauthFor(h, `${h.base}/mcp`, "ada@example.com");
   expect(await callerOf(forMcp.tokens.access_token)).toBeNull();
   // A tampered /api/v1 token, a forged key, no token and a session cookie are no caller either.
@@ -146,12 +148,24 @@ test("revokedRefused", async () => {
   expect(await callerOf(short.token)).toBeNull();
 });
 
+test("revokedConnectionRefusedOnRest", async () => {
+  // A script's OAuth token for /api/v1 stands on the person's consent as an MCP client's does: revoking the connection stops it at the next
+  // call, not when it expires. Their other connection goes on.
+  const script = await oauthFor(h, `${h.base}/api/v1`, "ada@example.com", { resources: [`${h.base}/api/v1`] });
+  const kept = await oauthFor(h, `${h.base}/api/v1`, "ada@example.com", { resources: [`${h.base}/api/v1`] });
+  expect(await callerOf(script.tokens.access_token)).not.toBeNull();
+  const c = (await connections(h.auth, me)).find((x) => x.client_id === script.client_id)!;
+  expect(await revokeConnection(h.auth, me, c.id)).toEqual({ ok: true });
+  expect(await callerOf(script.tokens.access_token)).toBeNull();
+  expect(await callerOf(kept.tokens.access_token)).not.toBeNull();
+});
+
 test("removedAddressKeyRefused", async () => {
   const leaver = (await personOf(new Headers({ cookie: cookieOf(await signIn(h, "leaver@example.com")) }), h.auth))!.id;
   const key = await tokenFor(leaver);
   const { tokens } = await oauthFor(h, `${h.base}/api/v1`, "leaver@example.com", { resources: [`${h.base}/api/v1`] });
   expect((await callerOf(key.token))?.actor).toBe("leaver@example.com");
-  expect((await callerOf(tokens.access_token))?.actor).toBe("leaver@example.com");
+  expect((await callerOf(tokens.access_token))?.actor).toBe("leaver@example.com via Claude");
   // Taken off the list (the settings Better Auth reads, changed in place): neither the key nor the OAuth token is a caller any more. The
   // key is kept, for when the address is put back.
   const at = h.settings.allowed.indexOf("leaver@example.com");

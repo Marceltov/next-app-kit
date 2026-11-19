@@ -275,3 +275,14 @@ test("a 405 and a 500 are never cached", async () => {
   expect(r.status).toBe(500);
   expect(r.headers.get("cache-control")).toBe("no-store");
 });
+
+test("pathParamsMatchDeclared: openApiDocument refuses a path whose {params} differ from the operation's params", () => {
+  const doc = (ops: Op<Ctx>[]) => () => openApiDocument(ops, { title: "T", version: "1", serverUrl: BASE });
+  expect(doc([op("GET", "/x/{id}/y/{part}", "getPart")])).not.toThrow();
+  // A parameter the path has and params leaves out would be undocumented; one params names and the path lacks never arrives.
+  expect(doc([{ ...op("GET", "/x/{id}", "getX"), params: {} }])).toThrow("getX: the path's parameters {id} differ from params {}");
+  expect(doc([{ ...op("GET", "/x", "listX"), params: { id: "an id" } }])).toThrow("listX: the path's parameters {} differ from params {id}");
+  expect(doc([{ ...op("GET", "/x/{id}", "getX"), params: { ident: "an id" } }])).toThrow("getX: the path's parameters {id} differ from params {ident}");
+  // An operation without params and a path without any is fine.
+  expect(doc([{ ...op("GET", "/x", "listX"), params: undefined }])).not.toThrow();
+});
