@@ -1,0 +1,73 @@
+{
+  "name": "next-app-kit",
+  "version": "0.0.0",
+  "description": "Sign-in, API tokens, the MCP endpoint and its OAuth, REST with OpenAPI, migrations and multipart uploads for Next.js apps: the infrastructure every app shares, in one library.",
+  "license": "Apache-2.0",
+  "author": "Marcel Bruckner",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=26"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "test": "vitest run"
+  },
+  "peerDependencies": {
+    "@better-auth/api-key": "1.7.21",
+    "@better-auth/cimd": "1.7.21",
+    "@better-auth/mcp": "1.7.21",
+    "@better-auth/oauth-provider": "1.7.21",
+    "@better-auth/passkey": "1.7.21",
+    "@modelcontextprotocol/server": "2.4.0",
+    "better-auth": "1.7.21",
+    "better-sqlite3": "13.0.3",
+    "kysely": "0.29.8",
+    "next": "16.4.6",
+    "nodemailer": "10.5.0",
+    "zod": "4.6.7"
+  },
+  "peerDependenciesMeta": {
+    "next": {
+      "optional": true
+    }
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Marceltov/next-app-kit.git"
+  },
+  "devDependencies": {
+    "@better-auth/api-key": "1.7.21",
+    "@better-auth/cimd": "1.7.21",
+    "@better-auth/mcp": "1.7.21",
+    "@better-auth/oauth-provider": "1.7.21",
+    "@better-auth/passkey": "1.7.21",
+    "@eslint/js": "^10.0.1",
+    "@modelcontextprotocol/server": "2.4.0",
+    "@types/node": "^26.6.6",
+    "better-auth": "1.7.21",
+    "better-sqlite3": "13.0.3",
+    "eslint": "^10.15.0",
+    "eslint-config-prettier": "^10.1.8",
+    "kysely": "0.29.8",
+    "next": "16.4.6",
+    "nodemailer": "10.5.0",
+    "prettier": "^3.10.1",
+    "typescript": "^6.0.3",
+    "typescript-eslint": "^8.73.0",
+    "vitest": "^5.1.1",
+    "zod": "4.6.7"
+  }
+}

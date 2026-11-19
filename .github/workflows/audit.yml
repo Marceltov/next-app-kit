@@ -1,0 +1,25 @@
+name: Audit
+
+# Known vulnerabilities in what the kit hands to the apps that install it. A scheduled run, because an advisory appears without a commit;
+# Dependabot security updates open the pull request for a fixed version as soon as one is known, and this run is the net for what they miss.
+# The kit has no dependencies of its own: what apps get are its exact peers, which are also its devDependencies (so its tests run against
+# them). `npm audit --omit=dev` would therefore audit nothing; this audits the whole tree, the peers included. There is no image to scan.
+on:
+  schedule:
+    - cron: "23 5 * * *"
+  workflow_dispatch:
+  pull_request:
+    paths: [.github/workflows/audit.yml]
+
+permissions:
+  contents: read
+
+jobs:
+  npm:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+      - run: npm audit --audit-level=high
