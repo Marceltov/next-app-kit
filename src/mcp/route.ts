@@ -74,13 +74,14 @@ export async function mcpRoute(req: Request, ctx: McpContext): Promise<Response>
   const base = ctx.signIn.baseUrl;
   const origin = req.headers.get("origin");
   if (origin !== null) {
-    let host: string | null = null;
+    let from: string | null = null;
     try {
-      host = new URL(origin).host;
+      from = new URL(origin).origin;
     } catch {
       // Not a URL ("null" included): no origin of ours.
     }
-    if (host !== new URL(base).host) return rpcError(403, "forbidden origin");
+    // The whole origin, scheme and port included: http://host is not https://host.
+    if (from !== new URL(base).origin) return rpcError(403, "forbidden origin");
   }
   const refuse = (message: string) =>
     rpcError(401, message, { "www-authenticate": `Bearer error="invalid_token", resource_metadata="${base}/.well-known/oauth-protected-resource/mcp"` });

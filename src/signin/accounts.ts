@@ -360,6 +360,8 @@ export function apiTokenPrefixOf(auth: Auth): string {
 
 /** Opens auth.sqlite, creates or extends Better Auth's own tables as its version and plugins need, and starts it. */
 export async function openAuth(s: SignInSettings, o: OpenAuthOptions): Promise<Auth> {
+  // Every JWT starts with "ey" (base64 of `{"`): a key with that prefix, or with none, could not be told from an access token at a glance.
+  if (!o.apiTokenPrefix || o.apiTokenPrefix.startsWith("ey")) throw new Error(`apiTokenPrefix "${o.apiTokenPrefix}" must be non-empty and not start with "ey"`);
   if (s.file !== ":memory:") mkdirSync(dirname(s.file), { recursive: true });
   const database = new BetterSqlite3(s.file, { timeout: 5000 });
   try {

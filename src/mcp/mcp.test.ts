@@ -8,6 +8,7 @@ import { personOf } from "../signin/person.js";
 import { cookieOf, oauthFor, signIn, startHarness, type Harness } from "../signin/testing.js";
 import { createApiToken } from "../tokens/index.js";
 import { callTool, connections, defineTool, mcpRoute, refuse, revokeConnection, type McpContext, type Tool, type Who } from "./index.js";
+import { refusalOf } from "./tools.js";
 
 const V = "2026-07-28";
 const META = { "io.modelcontextprotocol/clientInfo": { name: "t", version: "0" }, "io.modelcontextprotocol/clientCapabilities": {} };
@@ -107,6 +108,10 @@ test("foreignOriginRefused", async () => {
   expect((await rpc("tools/list", {}, { ...ada.auth, origin: "https://evil.example" })).status).toBe(403);
   expect((await rpc("tools/list", {}, { ...ada.auth, origin: "null" })).status).toBe(403);
   expect((await rpc("tools/list", {}, { origin: "https://evil.example" })).status).toBe(403);
+  // The whole origin counts, scheme and port included: the same host over another scheme is another origin.
+  const other = new URL(h.base);
+  other.protocol = "https:";
+  expect((await rpc("tools/list", {}, { ...ada.auth, origin: other.origin })).status).toBe(403);
   expect((await rpc("tools/list", {}, { ...ada.auth, origin: h.base })).status).toBe(200);
   expect((await rpc("tools/list", {}, ada.auth)).status).toBe(200);
 });
@@ -237,4 +242,9 @@ test("callToolRunsAsWho", async () => {
   expect((await callTool(ctx, who, "echo", { text: "" })).isError).toBe(true);
   const tools: Tool[] = ctx.tools;
   expect(tools).toHaveLength(2);
+});
+
+test("refusalOfAnythingElseIsNull", () => {
+  expect(refusalOf(refuse("no"))).toBe("no");
+  for (const r of [null, undefined, "no", 1, { guidance: [] }]) expect(refusalOf(r)).toBeNull();
 });

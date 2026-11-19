@@ -19,7 +19,7 @@ export type Refused = { readonly [REFUSED]: string };
 export const refuse = (message: string): Refused => ({ [REFUSED]: message });
 
 /** The message of a refusal; null for a result. */
-export const refusalOf = (r: object): string | null => (REFUSED in r ? (r as Refused)[REFUSED] : null);
+export const refusalOf = (r: unknown): string | null => (typeof r === "object" && r !== null && REFUSED in r ? (r as Refused)[REFUSED] : null);
 
 /** A defined tool, as mcpRoute serves it. `outputSchema` already has `guidance`. */
 export type Tool = {

@@ -247,3 +247,9 @@ test("eachResourceGetsItsOwnToken", async () => {
   const key = (await h.auth.api.createApiKey({ body: { name: "t", userId: ada.id } })) as { key: string };
   expect(key.key.startsWith(API_TOKEN_PREFIX)).toBe(true);
 });
+
+test("apiTokenPrefixNotEmptyNorJwtLike", async () => {
+  // A key must be told apart from a JWT by its prefix alone, and every JWT starts with "ey".
+  for (const apiTokenPrefix of ["", "ey", "eyx_"])
+    await expect(openAuth({ ...h.settings, file: ":memory:" }, { apiTokenPrefix, texts: TEXTS })).rejects.toThrow(/apiTokenPrefix/);
+});
