@@ -7,7 +7,9 @@
 // tokens for /api/v1 (next-app-kit/tokens); a `read` token may only GET. Where this differs from noticebox: an operation is generic over the
 // app's context (`ctx` in place of `rt`); the app decides who the caller is (restCaller) and passes it in, and a request without one gets
 // 401 before anything else, an unknown path or method included; a body over 256 KiB (counted in bytes, read no further) answers 413, not
-// 400; the OpenAPI title, version, licence, tags and texts are the app's.
+// 400; the OpenAPI title, version, licence, tags and texts are the app's. Conditional GETs (not in noticebox): an operation sees the request's
+// headers and may return an ETag with its 200; restRoute then answers a request whose If-None-Match names it 304 without the body, so a
+// client that polls a file (the site build fetching every photo) moves only what changed.
 import * as z from "zod";
 import type { Tool } from "../mcp/tools.js";
 import type { RestCaller } from "../tokens/index.js";
@@ -17,11 +19,25 @@ export const API_PREFIX = "/api/v1";
 /** The largest JSON body read: a form with many fields is a few kilobytes. */
 export const MAX_BODY_BYTES = 256 * 1024;
 
-/** A handler's answer: JSON (`body`), nothing (no `body`), or a Response of its own that is not JSON, such as a file (`raw`). */
-export type Reply = { status: number; body?: unknown; raw?: Response };
+/**
+ * A handler's answer: JSON (`body`), nothing (no `body`), or a Response of its own that is not JSON, such as a file (`raw`). `etag` (a
+ * quoted entity tag, `"<hash>"`) goes out as the ETag header; on a GET's 200 a request whose If-None-Match names it is answered 304.
+ */
+export type Reply = { status: number; body?: unknown; raw?: Response; etag?: string };
 
-/** What a handler gets: the app's context, the base URL, the caller, and the path parameters, query and body its schemas have parsed. */
-export type Input<Ctx> = { ctx: Ctx; base: string; caller: RestCaller; params: Record<string, string>; query: Record<string, unknown>; body: unknown };
+/**
+ * What a handler gets: the app's context, the base URL, the caller, the path parameters, query and body its schemas have parsed, and the
+ * request's headers.
+ */
+export type Input<Ctx> = {
+  ctx: Ctx;
+  base: string;
+  caller: RestCaller;
+  params: Record<string, string>;
+  query: Record<string, unknown>;
+  body: unknown;
+  headers: Headers;
+};
 
 /**
  * One operation of the table. It names the MCP tool it mirrors (`tool`), or, where no tool can do what it does (the bytes of a file), says
@@ -36,7 +52,8 @@ export type Op<Ctx> = ({ tool: string; noTool?: undefined } | { tool?: undefined
   params?: Record<string, string>; // name: description
   query?: z.ZodObject;
   body?: z.ZodType;
-  ok: { status: number; description: string; schema?: z.ZodType; binary?: boolean }; // `binary`: the bytes of a file, not JSON
+  // `binary`: the bytes of a file, not JSON; `etag`: the 200 carries an ETag and the operation may answer 304 (documented as such).
+  ok: { status: number; description: string; schema?: z.ZodType; binary?: boolean; etag?: boolean };
   errors: number[];
   handle: (input: Input<Ctx>) => Promise<Reply> | Reply;
 };
@@ -70,6 +87,16 @@ const ERRORS: Record<number, [string, string]> = {
 /** A refusal as every error is answered: `{error, code}`, the code from the status. The message is English and never holds a token. A handler
  * that throws is answered 500 and its message is logged through `settings.log`, so an error message must not carry a secret either. */
 export const fail = (status: number, error: string): Reply => ({ status, body: { error, code: ERRORS[status]?.[0] ?? "internal" } });
+
+/** Whether an If-None-Match header (a list of tags, weak ones allowed, or `*`) names `etag`. An app's own route that serves files uses it too. */
+export function etagMatches(ifNoneMatch: string | null, etag: string): boolean {
+  if (!ifNoneMatch) return false;
+  const strong = etag.replace(/^W\//, "");
+  return ifNoneMatch.split(",").some((t) => {
+    const tag = t.trim();
+    return tag === "*" || tag.replace(/^W\//, "") === strong;
+  });
+}
 
 /** Every operation whose path fits, each with its own path parameters, the one with the most literal segments first: `/x/export` wins over `/x/{id}`. */
 function match<Ctx>(ops: Op<Ctx>[], segments: string[]): { op: Op<Ctx>; params: Record<string, string> }[] {
@@ -131,11 +158,26 @@ export async function restRoute<Ctx>(req: Request, ops: Op<Ctx>[], ctx: Ctx, cal
   if (settings.openApi && segments?.length === 1 && segments[0] === "openapi.json" && req.method === "GET")
     return Response.json(openApiDocument(ops, { ...settings.openApi, serverUrl: base + API_PREFIX }), { headers: { "cache-control": "no-store" } });
   const challenge = { "www-authenticate": `Bearer resource_metadata="${base}/.well-known/oauth-protected-resource${API_PREFIX}"` };
-  const send = (r: Reply) =>
-    r.raw ??
-    (r.body === undefined
-      ? new Response(null, { status: r.status })
-      : Response.json(r.body, { status: r.status, headers: { "cache-control": "no-store", ...(r.status === 401 ? challenge : {}) } }));
+  const send = (r: Reply) => {
+    // A reply with an ETag may be kept and asked about again; any other JSON is never stored.
+    const cache = r.raw?.headers.get("cache-control") ?? (r.etag ? "private, no-cache" : "no-store");
+    if (r.etag && r.status === 200 && etagMatches(req.headers.get("if-none-match"), r.etag)) {
+      void r.raw?.body?.cancel();
+      return new Response(null, { status: 304, headers: { etag: r.etag, "cache-control": cache } });
+    }
+    if (r.raw) {
+      if (r.etag && !r.raw.headers.has("etag")) {
+        const headers = new Headers(r.raw.headers);
+        headers.set("etag", r.etag);
+        return new Response(r.raw.body, { status: r.raw.status, statusText: r.raw.statusText, headers });
+      }
+      return r.raw;
+    }
+    const etag = r.etag ? { etag: r.etag } : {};
+    return r.body === undefined
+      ? new Response(null, { status: r.status, headers: etag })
+      : Response.json(r.body, { status: r.status, headers: { "cache-control": cache, ...etag, ...(r.status === 401 ? challenge : {}) } });
+  };
   if (!caller) return send(fail(401, "an API token or an access token for this API is needed"));
   const candidates = segments ? match(ops, segments) : [];
   if (!candidates.length) return send(fail(404, "no such endpoint"));
@@ -168,7 +210,7 @@ export async function restRoute<Ctx>(req: Request, ops: Op<Ctx>[], ctx: Ctx, cal
     return send(fail(400, "a path parameter is not valid percent-encoding"));
   }
   try {
-    return send(await op.handle({ ctx, base, caller, params, query, body }));
+    return send(await op.handle({ ctx, base, caller, params, query, body, headers: req.headers }));
   } catch (e) {
     settings.log(`api ${op.operationId}: ${(e as Error).message}`);
     return Response.json({ error: "internal error", code: "internal" }, { status: 500, headers: { "cache-control": "no-store" } });
@@ -207,9 +249,13 @@ export function openApiDocument<Ctx>(ops: Op<Ctx>[], info: OpenApiInfo & { serve
     const responses: Record<string, unknown> = {
       [o.ok.status]: {
         description: o.ok.description,
+        ...(o.ok.etag && {
+          headers: { ETag: { description: "The entity tag; send it back as If-None-Match to get 304 when nothing changed", schema: { type: "string" } } },
+        }),
         ...(o.ok.schema && { content: { "application/json": { schema: jsonSchema(o.ok.schema, "output") } } }),
         ...(o.ok.binary && { content: { "application/octet-stream": { schema: { type: "string", format: "binary" } } } }),
       },
+      ...(o.ok.etag && { 304: { description: "Not modified: If-None-Match named the current ETag; no body" } }),
     };
     // Any operation with a body may answer 413, listed or not.
     const errors = o.body && !o.errors.includes(413) ? [...o.errors, 413] : o.errors;

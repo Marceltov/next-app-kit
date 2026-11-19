@@ -8,7 +8,7 @@ import { defineTool } from "../mcp/index.js";
 import { personOf } from "../signin/person.js";
 import { cookieOf, oauthFor, signIn, startHarness, type Harness } from "../signin/testing.js";
 import { createApiToken, restCaller, type RestCaller } from "../tokens/index.js";
-import { checkOpsMirrorTools, fail, openApiDocument, restRoute, type Op, type RestSettings } from "./index.js";
+import { checkOpsMirrorTools, etagMatches, fail, openApiDocument, restRoute, type Op, type RestSettings } from "./index.js";
 
 type Ctx = { things: string[] };
 
@@ -285,4 +285,81 @@ test("pathParamsMatchDeclared: openApiDocument refuses a path whose {params} dif
   expect(doc([{ ...op("GET", "/x/{id}", "getX"), params: { ident: "an id" } }])).toThrow("getX: the path's parameters {id} differ from params {ident}");
   // An operation without params and a path without any is fine.
   expect(doc([{ ...op("GET", "/x", "listX"), params: undefined }])).not.toThrow();
+});
+
+test("conditionalGet: an operation returns its ETag, and a request that holds it already gets 304 without the body", async () => {
+  const seen: (string | null)[] = [];
+  const tagged: Op<Ctx>[] = [
+    {
+      method: "GET",
+      path: "/files/{name}",
+      operationId: "getFile",
+      noTool: "the bytes of a file",
+      summary: "A file",
+      tag: "Things",
+      params: { name: "The file's name" },
+      ok: { status: 200, description: "The bytes", binary: true, etag: true },
+      errors: [401, 404],
+      handle: ({ params, headers }) => {
+        seen.push(headers.get("x-asked-by"));
+        if (params.name !== "a") return fail(404, "no such file");
+        return { status: 200, etag: '"v1"', raw: new Response("bytes", { headers: { "content-type": "text/plain", "cache-control": "private, no-cache" } }) };
+      },
+    },
+    {
+      method: "GET",
+      path: "/things/{name}",
+      operationId: "getThing",
+      tool: "get_thing",
+      summary: "A thing",
+      tag: "Things",
+      params: { name: "The thing's name" },
+      ok: { status: 200, description: "The thing", schema: z.object({ name: z.string() }), etag: true },
+      errors: [401],
+      handle: ({ params }) => ({ status: 200, etag: `"${params.name}-1"`, body: { name: params.name } }),
+    },
+  ];
+  const get = (path: string, headers: Record<string, string> = {}) =>
+    restRoute(new Request(`${BASE}/api/v1${path}`, { headers }), tagged, { things: [] }, READER, SETTINGS);
+
+  // The operation sees the request's headers.
+  const first = await get("/files/a", { "x-asked-by": "a test" });
+  expect(seen).toEqual(["a test"]);
+  expect(first.status).toBe(200);
+  expect(first.headers.get("etag")).toBe('"v1"');
+  expect(await first.text()).toBe("bytes");
+  for (const held of ['"v1"', 'W/"v1"', '"old", "v1"', "*"]) {
+    const again = await get("/files/a", { "if-none-match": held });
+    expect(again.status, held).toBe(304);
+    expect(again.headers.get("etag")).toBe('"v1"');
+    expect(again.headers.get("cache-control")).toBe("private, no-cache");
+    expect(await again.text()).toBe("");
+  }
+  expect((await get("/files/a", { "if-none-match": '"old"' })).status).toBe(200);
+  // Only a 200 is ever turned into a 304.
+  expect((await get("/files/b", { "if-none-match": "*" })).status).toBe(404);
+  // A JSON reply with an ETag may be kept and asked again (no-cache), not never stored.
+  const json = await get("/things/x");
+  expect(json.headers.get("etag")).toBe('"x-1"');
+  expect(json.headers.get("cache-control")).toBe("private, no-cache");
+  expect(await json.json()).toEqual({ name: "x" });
+  const unchanged = await get("/things/x", { "if-none-match": '"x-1"' });
+  expect(unchanged.status).toBe(304);
+  expect(unchanged.headers.get("cache-control")).toBe("private, no-cache");
+  // The document says so: the ETag header and a 304.
+  const doc = openApiDocument(tagged, { title: "T", version: "1", serverUrl: BASE }) as {
+    paths: Record<string, Record<string, { responses: Record<string, { headers?: Record<string, unknown> }> }>>;
+  };
+  const responses = doc.paths["/files/{name}"]!.get!.responses;
+  expect(Object.keys(responses).sort()).toEqual(["200", "304", "401", "404"]);
+  expect(responses["200"]!.headers?.ETag).toBeDefined();
+});
+
+test("etagMatches: If-None-Match is a list of tags, weak ones and * included", () => {
+  expect(etagMatches('"a"', '"a"')).toBe(true);
+  expect(etagMatches('"x", W/"a"', '"a"')).toBe(true);
+  expect(etagMatches("*", '"a"')).toBe(true);
+  expect(etagMatches('"b"', '"a"')).toBe(false);
+  expect(etagMatches(null, '"a"')).toBe(false);
+  expect(etagMatches("", '"a"')).toBe(false);
 });
