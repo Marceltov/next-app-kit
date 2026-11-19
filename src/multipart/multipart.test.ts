@@ -3,10 +3,10 @@
 import { mkdtempSync, readdirSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { expect, test } from "vitest";
+import { expect, test, vi } from "vitest";
 import { MultipartError, readMultipart, safeName } from "./index.js";
 
-const uploads = () => mkdtempSync(join(tmpdir(), "next-app-kit-multipart-"));
+const uploads = () => mkdtempSync(join(process.env.DATA_DIR!, "multipart-"));
 const file = (name: string, bytes: number | Uint8Array, type = "application/octet-stream") =>
   new File([typeof bytes === "number" ? new Uint8Array(new ArrayBuffer(bytes)).fill(7) : (bytes as Uint8Array<ArrayBuffer>)], name, { type });
 
@@ -144,6 +144,25 @@ test("abortedRequestLeavesNoTempFile: an abort signal on a body that just stops 
   expect(readdirSync(dir)).toEqual([]);
 });
 
+test("abortedRequestLeavesNoTempFile: a request already aborted before it is read is refused at once", async () => {
+  const dir = uploads();
+  const body = new ReadableStream<Uint8Array>({
+    start(c) {
+      c.enqueue(head("photo", "x".repeat(1000)));
+    },
+  });
+  const req = new Request("http://test.invalid/upload", {
+    method: "POST",
+    body,
+    headers: multipartHeaders,
+    duplex: "half",
+    signal: AbortSignal.abort(),
+  } as RequestInit);
+  const e = await refused(readMultipart(req, { maxFileBytes: 1024 * 1024, maxFiles: 1, tmpDir: dir }));
+  expect(e.status).toBe(400);
+  expect(readdirSync(dir)).toEqual([]);
+}, 2000);
+
 test("more files than maxFiles, a body that is not multipart, and an empty file are 400 and leave nothing", async () => {
   const dir = uploads();
   const two = await post({}, [
@@ -180,11 +199,19 @@ test("a file input left empty sends a part without a name or bytes: no file", as
 });
 
 test("the default tmpDir is the system's temporary directory, and the folder made there is removed again", async () => {
-  const before = readdirSync(tmpdir()).filter((n) => n.startsWith("next-app-kit-upload-"));
-  const m = await readMultipart(await post({}, [["photo", file("a.jpg", 5)]]), { maxFileBytes: 100, maxFiles: 1 });
-  expect(m.files[0]!.path.startsWith(tmpdir())).toBe(true);
-  await m.cleanup();
-  expect(readdirSync(tmpdir()).filter((n) => n.startsWith("next-app-kit-upload-"))).toEqual(before);
+  // TMPDIR points into the test's DATA_DIR, so the system's temporary directory is the test's own (conventions: code/tests-temp-dirs).
+  const dir = uploads();
+  vi.stubEnv("TMPDIR", dir);
+  try {
+    expect(tmpdir()).toBe(dir);
+    const m = await readMultipart(await post({}, [["photo", file("a.jpg", 5)]]), { maxFileBytes: 100, maxFiles: 1 });
+    expect(m.files[0]!.path.startsWith(dir)).toBe(true);
+    expect(readdirSync(dir)).toHaveLength(1);
+    await m.cleanup();
+    expect(readdirSync(dir)).toEqual([]);
+  } finally {
+    vi.unstubAllEnvs();
+  }
 });
 
 test("a file's own name is kept without a path, control characters or quotes", () => {

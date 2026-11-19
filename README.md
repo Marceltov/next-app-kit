@@ -20,6 +20,19 @@ Better Auth and its plugins, the MCP SDK, better-sqlite3, kysely, zod, nodemaile
 
 Apps keep their migration list in `backend/db/migrations.ts` and run it with the kit's `migrate` from `next-app-kit/migrations`.
 
+## Multipart uploads
+
+`readMultipart(req, { maxFileBytes, maxFiles, types?, tmpDir? })` from `next-app-kit/multipart` leaves each file in a temporary folder and throws a `MultipartError` carrying the status to answer with. The folder is removed on every failure; after a success it is the app's to remove, so call `cleanup()` in a `finally`:
+
+```ts
+const upload = await readMultipart(req, { maxFileBytes: 20 * 1024 * 1024, maxFiles: 10, types: ["image/*"] });
+try {
+  // move or read upload.files
+} finally {
+  await upload.cleanup();
+}
+```
+
 ## License
 
 [Apache-2.0](LICENSE).

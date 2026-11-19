@@ -98,6 +98,8 @@ export async function readMultipart(req: Request, opts: MultipartOptions): Promi
   };
   const onAbort = () => stop(new MultipartError(400, "the request was aborted"));
   req.signal.addEventListener("abort", onAbort, { once: true });
+  // A signal that was aborted before the listener came fires no event: the request is over already.
+  if (req.signal.aborted) onAbort();
 
   bb.on("field", (name, value, info) => {
     fieldBytes += Buffer.byteLength(value);
