@@ -1,5 +1,6 @@
 // The kit in a real Next.js app: sign in through testSignInRoute, make an API token on the app's page, call the REST operation with it, and
-// find the metadata the 401s of /api/v1 and /mcp point to. The consent page (the kit's copy-in source) renders for the signed-in person.
+// find the metadata the 401s of /api/v1 and /mcp point to. The consent page (the kit's copy-in source) renders for the signed-in person and
+// sends anyone else to the sign-in page openAuth was given.
 import { expect, test } from "@playwright/test";
 
 const PERSON = "ada@example.com";
@@ -48,4 +49,11 @@ test("the consent page asks the signed-in person", async ({ page }) => {
   await expect(page.getByRole("heading", { name: "Allow access?" })).toBeVisible();
   await expect(page.getByText(PERSON)).toBeVisible();
   await expect(page.getByRole("button", { name: "Allow" })).toBeVisible();
+});
+
+test("the consent page sends someone not signed in to the app's sign-in page, carrying where they were going", async ({ request }) => {
+  const r = await request.get("/consent?client_id=unknown&scope=openid", { maxRedirects: 0 });
+  expect(r.status()).toBe(307);
+  // openAuth's pages.signIn (backend/app.ts), not a page the consent page names itself.
+  expect(r.headers().location).toBe(`/sign-in?${new URLSearchParams({ next: "/consent?client_id=unknown&scope=openid" })}`);
 });

@@ -5,7 +5,7 @@
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { clientNameFor, personOf } from "next-app-kit/signin";
-import { auth } from "@/backend/app";
+import { auth, SIGN_IN_PAGE } from "@/backend/app";
 import { ConsentForm } from "./ConsentForm";
 
 export default async function ConsentPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
@@ -14,9 +14,13 @@ export default async function ConsentPage({ searchParams }: { searchParams: Prom
   const query = await searchParams;
   const a = await auth();
   const person = await personOf(h, a);
-  // The app's sign-in page (openAuth's `pages.signIn`, /login by default). This example has none: its tests sign in through
-  // /api/test/sign-in.
-  if (!person) redirect("/login");
+  // Not signed in: to the app's sign-in page, the one openAuth was given (`pages.signIn`), carrying this page and its signed query as
+  // `?next=`, so the person comes back here once signed in. This example has no sign-in page: its tests sign in through /api/test/sign-in.
+  if (!person) {
+    const back = new URLSearchParams();
+    for (const [k, v] of Object.entries(query)) for (const one of Array.isArray(v) ? v : v === undefined ? [] : [v]) back.append(k, one);
+    redirect(`${SIGN_IN_PAGE}?${new URLSearchParams({ next: `/consent?${back}` })}`);
+  }
   const clientId = typeof query.client_id === "string" ? query.client_id : "";
   const name = (clientId && (await clientNameFor(h, clientId, a))) || "An app this instance doesn't know";
   return (

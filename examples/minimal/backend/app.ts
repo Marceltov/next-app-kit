@@ -9,6 +9,9 @@ import * as z from "zod";
 
 export const PREFIX = "MINIMAL";
 
+/** The app's sign-in page, given to openAuth (`pages.signIn`; `/login` by default) and the one the consent page sends a stranger to. */
+export const SIGN_IN_PAGE = "/sign-in";
+
 const greet = defineTool({
   name: "greet",
   description: "Greets someone by name.",
@@ -41,6 +44,7 @@ async function open(): Promise<App> {
   const signIn = signInFromEnv(process.env, { prefix: PREFIX, file: join(process.env.DATA_DIR || ".data", "auth.sqlite"), appName: "Minimal", log });
   const auth = await openAuth(signIn, {
     apiTokenPrefix: "min_",
+    pages: { signIn: SIGN_IN_PAGE },
     texts: { en: { subject: (code) => `${code} is your sign-in code`, body: (code, link) => `Your code is ${code}${link ? `, or open ${link}` : ""}.` } },
   });
   return {
