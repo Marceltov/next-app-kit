@@ -161,6 +161,30 @@ test("toolWithoutOpFails", () => {
   );
 });
 
+test("opWithNoToolReasonAccepted", () => {
+  const download: Op<Ctx> = {
+    ...OPS[0]!,
+    path: "/things/{name}/file",
+    operationId: "getThingFile",
+    tool: undefined,
+    noTool: "the bytes of a file, which MCP can't carry",
+  };
+  expect(() => checkOpsMirrorTools([...OPS, download], [tool("list_things"), tool("add_thing")])).not.toThrow();
+  // A tool still needs its operation, and an op still names a tool or says why not, never both.
+  expect(() => checkOpsMirrorTools([download], [tool("list_things")])).toThrow("MCP tools without an operation: list_things");
+  const neither = { ...download, noTool: undefined } as unknown as Op<Ctx>;
+  expect(() => checkOpsMirrorTools([neither], [])).toThrow("operations naming neither an MCP tool nor why not: getThingFile");
+  const both = { ...download, tool: "list_things" } as unknown as Op<Ctx>;
+  expect(() => checkOpsMirrorTools([both, OPS[1]!], [tool("list_things"), tool("add_thing")])).toThrow(
+    "operations naming both a tool and noTool: getThingFile",
+  );
+});
+
+test("opWithEmptyNoToolReasonFails", () => {
+  const silent: Op<Ctx> = { ...OPS[0]!, operationId: "silent", tool: undefined, noTool: "  " };
+  expect(() => checkOpsMirrorTools([silent], [])).toThrow("operations naming neither an MCP tool nor why not: silent");
+});
+
 // Route-level token tests: restCaller as an app calls it, then restRoute.
 let h: Harness;
 let me = "";

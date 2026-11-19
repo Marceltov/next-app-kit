@@ -2,11 +2,12 @@
 // machinery; its operations stay in noticebox). The table is the API's single source: `restRoute` serves requests through it and
 // `openApiDocument` describes it (an app commits the result as openapi.json and a test fails when it is stale). MCP comes first: every
 // operation names the tool it mirrors and `checkOpsMirrorTools` fails an app's test when an operation names no tool or a tool has no
-// operation; there is no way out of that, as in noticebox. Handlers call the same domain functions as the tools; what a tool adds for an
-// assistant (`guidance`) stays out. Callers are API tokens and OAuth tokens for /api/v1 (next-app-kit/tokens); a `read` token may only GET.
-// Where this differs from noticebox: an operation is generic over the app's context (`ctx` in place of `rt`); the app decides who the caller
-// is (restCaller) and passes it in, and a request without one gets 401 before anything else, an unknown path or method included; a body
-// over 256 KiB (counted in bytes, read no further) answers 413, not 400; the OpenAPI title, version, licence, tags and texts are the app's.
+// operation. An operation no tool can mirror (the bytes of a file) says why in `noTool` instead; noticebox had no such way out. Handlers
+// call the same domain functions as the tools; what a tool adds for an assistant (`guidance`) stays out. Callers are API tokens and OAuth
+// tokens for /api/v1 (next-app-kit/tokens); a `read` token may only GET. Where this differs from noticebox: an operation is generic over the
+// app's context (`ctx` in place of `rt`); the app decides who the caller is (restCaller) and passes it in, and a request without one gets
+// 401 before anything else, an unknown path or method included; a body over 256 KiB (counted in bytes, read no further) answers 413, not
+// 400; the OpenAPI title, version, licence, tags and texts are the app's.
 import * as z from "zod";
 import type { Tool } from "../mcp/tools.js";
 import type { RestCaller } from "../tokens/index.js";
@@ -22,12 +23,14 @@ export type Reply = { status: number; body?: unknown; raw?: Response };
 /** What a handler gets: the app's context, the base URL, the caller, and the path parameters, query and body its schemas have parsed. */
 export type Input<Ctx> = { ctx: Ctx; base: string; caller: RestCaller; params: Record<string, string>; query: Record<string, unknown>; body: unknown };
 
-/** One operation of the table. */
-export type Op<Ctx> = {
+/**
+ * One operation of the table. It names the MCP tool it mirrors (`tool`), or, where no tool can do what it does (the bytes of a file), says
+ * why not (`noTool`, a reason that is not empty); never both.
+ */
+export type Op<Ctx> = ({ tool: string; noTool?: undefined } | { tool?: undefined; noTool: string }) & {
   method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
   path: string; // under /api/v1, with {params}
   operationId: string;
-  tool: string; // the MCP tool this mirrors
   summary: string;
   tag: string;
   params?: Record<string, string>; // name: description
@@ -212,7 +215,7 @@ export function openApiDocument<Ctx>(ops: Op<Ctx>[], info: OpenApiInfo & { serve
       [o.method.toLowerCase()]: {
         operationId: o.operationId,
         summary: o.summary,
-        description: `The REST counterpart of the MCP tool \`${o.tool}\`.`,
+        ...(o.tool !== undefined && { description: `The REST counterpart of the MCP tool \`${o.tool}\`.` }),
         tags: [o.tag],
         security: [{ bearer: [] }],
         ...(parameters.length && { parameters }),
@@ -250,14 +253,22 @@ export function openApiDocument<Ctx>(ops: Op<Ctx>[], info: OpenApiInfo & { serve
 }
 
 /**
- * MCP first, checked: every operation names an MCP tool that exists, every tool has an operation, and no operationId is used twice. Throws
- * with every name that is off; an app calls it in a test with its table and its tools.
+ * MCP first, checked: every operation names an MCP tool that exists or says why there is none (`noTool`, not empty), never both; every tool
+ * has an operation; and no operationId is used twice. Throws with every name that is off; an app calls it in a test with its table and its
+ * tools.
  */
 export function checkOpsMirrorTools<Ctx>(ops: Op<Ctx>[], tools: Pick<Tool, "name">[]): void {
   const toolNames = new Set(tools.map((t) => t.name));
-  const mirrored = new Set(ops.map((o) => o.tool));
+  const mirrored = new Set(ops.flatMap((o) => (o.tool === undefined ? [] : [o.tool])));
   const problems: string[] = [];
-  const unknown = ops.filter((o) => !toolNames.has(o.tool)).map((o) => `${o.operationId} (${o.tool})`);
+  const neither = ops.filter((o) => o.tool === undefined && !o.noTool?.trim()).map((o) => o.operationId);
+  if (neither.length) problems.push(`operations naming neither an MCP tool nor why not: ${neither.join(", ")}`);
+  // The type forbids both; a table built from untyped data may still have them.
+  const both = (ops as { tool?: string; noTool?: string; operationId: string }[])
+    .filter((o) => o.tool !== undefined && o.noTool !== undefined)
+    .map((o) => o.operationId);
+  if (both.length) problems.push(`operations naming both a tool and noTool: ${both.join(", ")}`);
+  const unknown = ops.filter((o) => o.tool !== undefined && !toolNames.has(o.tool)).map((o) => `${o.operationId} (${o.tool})`);
   if (unknown.length) problems.push(`operations naming no MCP tool: ${unknown.join(", ")}`);
   const bare = tools.filter((t) => !mirrored.has(t.name)).map((t) => t.name);
   if (bare.length) problems.push(`MCP tools without an operation: ${bare.join(", ")}`);
