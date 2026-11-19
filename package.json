@@ -109,5 +109,8 @@
   },
   "dependencies": {
     "busboy": "1.6.0"
+  },
+  "allowScripts": {
+    "better-sqlite3": false
   }
 }
