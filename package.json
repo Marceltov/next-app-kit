@@ -25,6 +25,10 @@
     "./mcp": {
       "types": "./dist/mcp/index.d.ts",
       "default": "./dist/mcp/index.js"
+    },
+    "./rest": {
+      "types": "./dist/rest/index.d.ts",
+      "default": "./dist/rest/index.js"
     }
   },
   "files": [
