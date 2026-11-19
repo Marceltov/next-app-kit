@@ -15,7 +15,12 @@ export type MailTexts = {
 /** A sign-in mail to send: `language` is one of the keys of the app's texts. */
 export type SignInMail = { to: string; code: string; link: string | undefined; language: string };
 
-export type Mailer = (mail: SignInMail) => Promise<void>;
+/**
+ * Sends one sign-in mail. `verify`, when there, checks that mail can go out without sending any (for SMTP: connect and log in). The kit
+ * calls it when an address that may not sign in asks for a code, so that answer follows the mail server's state, not the last listed
+ * address's send: without it, the first ask after an outage or a recovery would tell a stranger who is on the list.
+ */
+export type Mailer = ((mail: SignInMail) => Promise<void>) & { verify?: () => Promise<void> };
 
 // An SMTP server that never answers (a blocked port) fails the sign-in within these, logged, instead of hanging it.
 const TIMEOUTS = { connectionTimeout: 10_000, greetingTimeout: 10_000, socketTimeout: 20_000 };
@@ -52,9 +57,19 @@ export function renderMail(texts: Record<string, MailTexts>, mail: SignInMail): 
 
 /** Sends through SMTP. A failed send throws and logs nothing: openAuth logs it, once, without the address. */
 export function smtpMailer(smtp: Smtp, opts: { texts: Record<string, MailTexts> }): Mailer {
-  return async (mail) => {
+  const send: Mailer = async (mail) => {
     const { subject, text } = renderMail(opts.texts, mail);
     const { createTransport } = await import("nodemailer");
     await createTransport({ url: smtp.url, ...TIMEOUTS }).sendMail({ from: smtp.from, to: mail.to, subject, text });
   };
+  send.verify = async () => {
+    const { createTransport } = await import("nodemailer");
+    const transport = createTransport({ url: smtp.url, ...TIMEOUTS });
+    try {
+      await transport.verify();
+    } finally {
+      transport.close();
+    }
+  };
+  return send;
 }

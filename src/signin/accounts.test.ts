@@ -334,6 +334,52 @@ test("mailFailureIsAnError: a sign-in mail that could not be sent is not answere
   expect(await off.json()).toMatchObject({ code: "EMAIL_SIGN_IN_OFF" });
 });
 
+test("strangerFirstLearnsNothing: the first ask after mail breaks or recovers is answered alike for every address", async () => {
+  // The flag above flips only when a listed address sends. A mailer that can check its server lets an unlisted address's ask check it too,
+  // so the first ask after an outage or a recovery tells nobody who is on the list, whoever asks first.
+  let failing = false;
+  let checks = 0;
+  const mailer = Object.assign(
+    async () => {
+      if (failing) throw Object.assign(new Error("down"), { code: "ECONNREFUSED" });
+    },
+    {
+      verify: async () => {
+        checks++;
+        if (failing) throw Object.assign(new Error("down"), { code: "ECONNREFUSED" });
+      },
+    },
+  );
+  const logs: string[] = [];
+  const auth = await openAuth(
+    { ...h.settings, file: join(freshDir("strangerfirst"), "auth.sqlite"), log: (l: string) => void logs.push(l), mailer },
+    { apiTokenPrefix: API_TOKEN_PREFIX, texts: TEXTS },
+  );
+  const send = (email: string) =>
+    auth.handler(
+      new Request(`${h.base}/api/auth/email-otp/send-verification-otp`, {
+        method: "POST",
+        headers: { "content-type": "application/json", origin: h.base },
+        body: JSON.stringify({ email, type: "sign-in" }),
+      }),
+    );
+  expect((await send("eve@elsewhere.example")).status).toBe(200);
+  failing = true;
+  // Mail broke and nobody listed asked since: a stranger is told what a listed address would be.
+  const down = await send("eve@elsewhere.example");
+  expect(down.status).toBe(502);
+  expect(await down.json()).toMatchObject({ code: "MAIL_NOT_SENT" });
+  expect((await send("ada@example.com")).status).toBe(502);
+  failing = false;
+  // Mail is back and nobody listed asked since: the stranger is told "sent", as a listed address would be.
+  expect((await send("eve@elsewhere.example")).status).toBe(200);
+  expect((await send("ada@example.com")).status).toBe(200);
+  expect(checks).toBe(3);
+  // The check's failure is logged like a send's, without the address.
+  expect(logs.filter((l) => l.startsWith("error: sign-in mail server not reachable"))).toHaveLength(1);
+  expect(logs.join("\n")).not.toContain("eve@elsewhere.example");
+});
+
 test("smtpFailureLogsOneLine: one failed send through SMTP is one line in the log", async () => {
   // A local server that hangs up at once: the send fails without leaving this machine.
   const { createServer } = await import("node:net");
@@ -359,4 +405,32 @@ test("smtpFailureLogsOneLine: one failed send through SMTP is one line in the lo
   server.close();
   expect(r.status).toBe(502);
   expect(logs.filter((l) => /could not be sent|failed \(/.test(l))).toEqual([expect.stringMatching(/^error: sign-in mail could not be sent \(/)]);
+});
+
+test("smtpMailerChecksItsServer: an unlisted address's ask checks the SMTP server, without sending", async () => {
+  const { createServer } = await import("node:net");
+  const server = createServer((socket) => socket.destroy());
+  await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
+  const port = (server.address() as { port: number }).port;
+  const logs: string[] = [];
+  const auth = await openAuth(
+    {
+      ...h.settings,
+      file: join(freshDir("smtpverify"), "auth.sqlite"),
+      log: (l: string) => void logs.push(l),
+      mailer: undefined,
+      smtp: { url: `smtp://127.0.0.1:${port}`, from: "app@example.org" },
+    },
+    { apiTokenPrefix: API_TOKEN_PREFIX, texts: TEXTS },
+  );
+  const r = await auth.handler(
+    new Request(`${h.base}/api/auth/email-otp/send-verification-otp`, {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: h.base },
+      body: JSON.stringify({ email: "eve@elsewhere.example", type: "sign-in" }),
+    }),
+  );
+  server.close();
+  expect(r.status).toBe(502);
+  expect(logs.filter((l) => l.startsWith("error: sign-in mail server not reachable"))).toHaveLength(1);
 });
