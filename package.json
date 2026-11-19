@@ -13,6 +13,10 @@
     "./migrations": {
       "types": "./dist/migrations/index.d.ts",
       "default": "./dist/migrations/index.js"
+    },
+    "./signin": {
+      "types": "./dist/signin/index.d.ts",
+      "default": "./dist/signin/index.js"
     }
   },
   "files": [
@@ -32,6 +36,7 @@
   "peerDependencies": {
     "@better-auth/api-key": "1.7.21",
     "@better-auth/cimd": "1.7.21",
+    "@better-auth/core": "1.7.21",
     "@better-auth/mcp": "1.7.21",
     "@better-auth/oauth-provider": "1.7.21",
     "@better-auth/passkey": "1.7.21",
@@ -55,6 +60,7 @@
   "devDependencies": {
     "@better-auth/api-key": "1.7.21",
     "@better-auth/cimd": "1.7.21",
+    "@better-auth/core": "1.7.21",
     "@better-auth/mcp": "1.7.21",
     "@better-auth/oauth-provider": "1.7.21",
     "@better-auth/passkey": "1.7.21",
@@ -62,6 +68,7 @@
     "@modelcontextprotocol/server": "2.4.0",
     "@types/better-sqlite3": "^9.6.0",
     "@types/node": "^26.6.6",
+    "@types/nodemailer": "^8.0.2",
     "better-auth": "1.7.21",
     "better-sqlite3": "13.0.3",
     "eslint": "^10.15.0",
