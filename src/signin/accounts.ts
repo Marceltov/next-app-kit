@@ -100,7 +100,7 @@ const refusal = defineRequestState((): Refusal | null => null);
  * Whether the sign-in mail of this request went out. Better Auth awaits the mail but swallows its failure and answers `{success: true}`,
  * so the page said "code sent" when nothing was: the send notes the failure here, and the after hook answers the request with an error
  * instead (502 `MAIL_NOT_SENT`; 400 `EMAIL_SIGN_IN_OFF` when this instance mails nothing). Until a mail goes out again, an address not on the
- * list is answered MAIL_NOT_SENT too.
+ * list is answered MAIL_NOT_SENT too; one whose mailer can check its server (`Mailer.verify`) is answered by that check.
  */
 const mailProblem = defineRequestState((): "failed" | "off" | null => null);
 
@@ -325,8 +325,18 @@ function options(s: SignInSettings, o: OpenAuthOptions, database: BetterSqlite3.
           if (type !== "sign-in") return;
           if (!mail) return void (await mailProblem.set("off").catch(() => {}));
           // No mail to an address that may not sign in: nobody can use the app to send mail to strangers. Its answer is the one a listed
-          // address would get now.
+          // address would get now: a mailer that can check its server is asked (which also takes about as long as a send), so the answer
+          // follows the server, not the last listed send; one that can't falls back to that send's result.
           if (!emailAllowed(s.allowed, email)) {
+            if (mail.verify) {
+              try {
+                await mail.verify();
+                mailFailing = false;
+              } catch (e) {
+                mailFailing = true;
+                s.log(`error: sign-in mail server not reachable (${(e as NodeJS.ErrnoException).code ?? "unknown"})`);
+              }
+            }
             if (mailFailing) await mailProblem.set("failed").catch(() => {});
             return;
           }
