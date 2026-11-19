@@ -72,22 +72,31 @@ export async function freshAuth(prefix: string, o: FreshAuthOptions = {}): Promi
 
 type Cookie = { name: string; value: string; attributes: { path?: string; httpOnly?: boolean; secure?: boolean; sameSite?: string; maxAge?: number } };
 
+/** The address may not sign in: not on the allowlist, or not verified. Any other failure is an Error of another kind. */
+export class SignInRefused extends Error {
+  constructor(address: string) {
+    super(`${address} can't sign in: it is not on the allowlist, or not verified`);
+    this.name = "SignInRefused";
+  }
+}
+
 async function sessionCookie(auth: Auth, email: string): Promise<Cookie> {
   const ctx = await auth.$context;
   const address = email.trim().toLowerCase();
-  // Better Auth's own hooks run here as at any sign-in: an address not on the list, or not verified, gets no user and no session.
+  // Better Auth's own hooks run here as at any sign-in: an address not on the list, or not verified, gets no user and no session (the
+  // hooks answer false, and Better Auth returns null). Anything that throws is another failure and is passed on as it is.
   const found = await ctx.internalAdapter.findUserByEmail(address);
-  const user =
-    found?.user ?? (await ctx.internalAdapter.createUser({ email: address, name: address, emailVerified: true }, { method: "email-otp" }).catch(() => null));
-  const session = user ? await ctx.internalAdapter.createSession(user.id).catch(() => null) : null;
-  if (!session) throw new Error(`${address} can't sign in: it is not on the allowlist, or not verified`);
+  const user = found?.user ?? (await ctx.internalAdapter.createUser({ email: address, name: address, emailVerified: true }, { method: "email-otp" }));
+  const session = user ? await ctx.internalAdapter.createSession(user.id) : null;
+  if (!session) throw new SignInRefused(address);
   const { name, attributes } = ctx.authCookies.sessionToken;
   return { name, value: encodeURIComponent(`${session.token}.${await makeSignature(session.token, ctx.secret)}`), attributes };
 }
 
 /**
  * Signs `email` in through Better Auth's server side, creating the person on first use, and returns the session cookie as a request's
- * `cookie` header carries it (`name=value`). Refused, with an error, for an address not on the allowlist.
+ * `cookie` header carries it (`name=value`). Refused with a SignInRefused for an address not on the allowlist (a person already made is
+ * refused too once the address is taken off it); other failures throw as they are.
  */
 export async function signedInCookie(auth: Auth, email: string): Promise<string> {
   const c = await sessionCookie(auth, email);
@@ -107,7 +116,8 @@ const setCookie = (c: Cookie) =>
 /**
  * GET <route>?email=…&next=/path: the end-to-end tests' way in. Signs the address in (it must be on the allowlist) and sends the browser
  * on to `next` (a path of this instance; `/` otherwise) with the session cookie set. Returns a handler only while `<PREFIX>_E2E=1` and
- * NODE_ENV is not `production`; otherwise `undefined`, so the app's route file exports no GET and the route does not exist:
+ * NODE_ENV is not `production`; otherwise `undefined`, so the app's route file exports no GET and the route does not exist. An address
+ * the allowlist refuses answers 403; any other failure 500:
  *
  *     // app/api/test/sign-in/route.ts
  *     export const GET = testSignInRoute("UPLOAD", auth);
@@ -123,7 +133,7 @@ export function testSignInRoute(prefix: string, getAuth: () => Auth | Promise<Au
     try {
       cookie = await sessionCookie(await getAuth(), email);
     } catch (e) {
-      return Response.json({ error: (e as Error).message }, { status: 403 });
+      return Response.json({ error: e instanceof Error ? e.message : String(e) }, { status: e instanceof SignInRefused ? 403 : 500 });
     }
     return new Response(null, {
       status: 303,

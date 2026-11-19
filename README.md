@@ -42,9 +42,9 @@ The kit ships no UI. During an MCP client's or a script's OAuth sign-in, Better 
 
 `next-app-kit/testing`, for an app's tests and its end-to-end run:
 
-- `freshAuth(prefix, { allowed? })`: Better Auth with its `auth.sqlite` in the test's temporary `DATA_DIR`, the sign-in mail caught in `mail`.
-- `signedInCookie(auth, email)`: signs a person on the allowlist in through Better Auth's server side and returns the session cookie as a `cookie` header carries it.
-- `testSignInRoute(prefix, auth)`: `GET ?email=…&next=/path` signs the browser in, for Playwright against `next dev`. It returns a handler only with `<PREFIX>_E2E=1` outside production; under `NODE_ENV=production` it returns `undefined`, so the route file exports no `GET`, and the handler is compiled out of the production build (`examples/minimal` checks both in CI: `npm run test:absent`).
+- `freshAuth(prefix, options?)`: Better Auth as `openAuth` opens it, with its `auth.sqlite` in a new directory under the test's temporary `DATA_DIR`. Options, all optional: `allowed` (addresses and `@domain` entries; default `["@example.com"]`), `baseUrl` (`PUBLIC_URL`; default `http://localhost:3000`, where nothing listens), `apiTokenPrefix` (default `test_`), `texts` (the sign-in mail; default an English one). Returns `{ auth, signIn, mail, logs }`: the `Auth`, the `SignInSettings` it was opened with, the last sign-in mail to each address (`Map<string, SignInMail>`, with its `code` and `link`) and every line the kit and Better Auth logged (`string[]`).
+- `signedInCookie(auth, email)`: signs a person on the allowlist in through Better Auth's server side (creating them on first use) and returns the session cookie as a `cookie` header carries it. An address not on the list, or taken off it since, throws `SignInRefused`; any other failure throws as it is.
+- `testSignInRoute(prefix, auth)`: `GET ?email=…&next=/path` signs the browser in, for Playwright against `next dev` (403 for an address the allowlist refuses, 500 for any other failure). It returns a handler only with `<PREFIX>_E2E=1` outside production; under `NODE_ENV=production` it returns `undefined`, so the route file exports no `GET`, and the handler is compiled out of the production build (`examples/minimal` checks both in CI: `npm run test:absent`).
 - `callTool(ctx, who, name, input)`: runs one MCP tool as `who`, through the MCP server, without a token.
 
 ## Example

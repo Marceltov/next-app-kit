@@ -6,8 +6,9 @@ import { existsSync } from "node:fs";
 import { afterEach, expect, test, vi } from "vitest";
 import * as z from "zod";
 import { defineTool, type McpContext, type Who } from "../mcp/index.js";
+import { openAuth } from "../signin/accounts.js";
 import { personOf } from "../signin/person.js";
-import { callTool, freshAuth, signedInCookie, testSignInRoute } from "./index.js";
+import { callTool, freshAuth, SignInRefused, signedInCookie, testSignInRoute } from "./index.js";
 
 afterEach(() => {
   vi.unstubAllEnvs();
@@ -34,7 +35,17 @@ test("signedInCookie signs a person on the list in, the same person each time", 
 
 test("signedInCookie refuses an address not on the list, as any sign-in does", async () => {
   const { auth } = await freshAuth("TEST", { allowed: ["ada@example.com"] });
+  await expect(signedInCookie(auth, "eve@example.com")).rejects.toThrow(SignInRefused);
   await expect(signedInCookie(auth, "eve@example.com")).rejects.toThrow(/eve@example.com/);
+});
+
+test("signedInCookie refuses a person already made once the address is taken off the list", async () => {
+  const { auth, signIn } = await freshAuth("TEST", { allowed: ["ada@example.com", "bob@example.com"] });
+  await signedInCookie(auth, "ada@example.com");
+  // The list shrinks at a restart: the same auth.sqlite opened again with Ada no longer on it.
+  const after = await openAuth({ ...signIn, allowed: ["bob@example.com"] }, { apiTokenPrefix: "test_", texts: { en: { subject: (c) => c, body: (c) => c } } });
+  await expect(signedInCookie(after, "ada@example.com")).rejects.toThrow(SignInRefused);
+  expect(await personOf(new Headers({ cookie: await signedInCookie(after, "bob@example.com") }), after)).toMatchObject({ email: "bob@example.com" });
 });
 
 test("testSignInRoute is off without <PREFIX>_E2E=1", async () => {
@@ -77,6 +88,17 @@ test("testSignInRoute under <PREFIX>_E2E=1 outside production: a session cookie 
   expect(eve.status).toBe(403);
   expect(eve.headers.get("set-cookie")).toBeNull();
   expect((await route(new Request(`${signIn.baseUrl}/api/test/sign-in`))).status).toBe(400);
+});
+
+test("testSignInRoute answers 500, not 403, when something other than the allowlist fails", async () => {
+  vi.stubEnv("TEST_E2E", "1");
+  vi.stubEnv("NODE_ENV", "development");
+  const route = testSignInRoute("TEST", () => {
+    throw new Error("auth.sqlite can't be opened");
+  })!;
+  const r = await route(new Request("http://localhost:3000/api/test/sign-in?email=ada@example.com"));
+  expect(r.status).toBe(500);
+  expect(r.headers.get("set-cookie")).toBeNull();
 });
 
 test("callTool runs a tool as someone, through the MCP server, without a token", async () => {
