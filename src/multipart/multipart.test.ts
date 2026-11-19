@@ -248,3 +248,24 @@ test("everyRefusalCarriesItsCode: an app tells refusals apart by code, never by 
   expect(await codeOf(new Request("http://test.invalid/upload", { method: "POST" }))).toEqual([400, "not_multipart"]);
   expect(readdirSync(dir)).toEqual([]);
 });
+
+test("refusedFileDoesNotStall: a file refused as it starts answers at once, even with nothing else waking the event loop", async () => {
+  // Stopping the post from inside busboy's own file event left the pipeline waiting for a write that never finished, until some unrelated
+  // timer or I/O woke the process (an iPhone's HEIC upload hung until the request timed out). Each refusal here must answer by itself.
+  const dir = uploads();
+  const bytes = new Uint8Array(300_000).fill(7);
+  for (let i = 0; i < 40; i++) {
+    const req = await post({}, [["photo", file("IMG_0001.HEIC", bytes, "image/heic")]]);
+    const started = performance.now();
+    const e = await Promise.race([
+      readMultipart(req, { maxFileBytes: 1024 * 1024, maxFiles: 1, tmpDir: dir, types: ["image/jpeg"] }).then(
+        () => null,
+        (x: unknown) => x as MultipartError,
+      ),
+      new Promise<"stalled">((r) => setTimeout(() => r("stalled"), 1000)),
+    ]);
+    expect(e === "stalled" ? "stalled" : e?.code).toBe("wrong_type");
+    expect(performance.now() - started).toBeLessThan(500);
+  }
+  expect(readdirSync(dir)).toEqual([]);
+}, 60_000);

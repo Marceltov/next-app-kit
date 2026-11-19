@@ -97,13 +97,19 @@ export async function readMultipart(req: Request, opts: MultipartOptions): Promi
   let count = 0;
   let n = 0;
 
-  /** Stops reading the post: the first problem is the answer, the rest is never read. */
+  /**
+   * Stops reading the post: the first problem is the answer, the rest is never read. The streams are torn down on the next tick: stop is
+   * often called from inside busboy's own file event, in the middle of its write, and destroying it there left the pipeline waiting for
+   * that write until something unrelated woke the event loop (a refused HEIC hung until the request timed out).
+   */
   const stop = (e?: MultipartError) => {
     failure ??= e ?? null;
-    source.unpipe();
-    source.destroy();
-    total.destroy();
-    bb.destroy();
+    process.nextTick(() => {
+      source.unpipe();
+      source.destroy();
+      total.destroy();
+      bb.destroy();
+    });
   };
   const onAbort = () => stop(new MultipartError("aborted", "the request was aborted"));
   // The body itself failing (the connection dropped) is an abort too; busboy would only call the cut-off rest "not a form".
