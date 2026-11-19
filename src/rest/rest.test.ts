@@ -47,7 +47,7 @@ const OPS: Op<Ctx>[] = [
 const BASE = "https://app.example";
 const logs: string[] = [];
 const SETTINGS: RestSettings = { base: BASE, log: (line) => void logs.push(line) };
-const WRITER: RestCaller = { person: "u1", actor: "ada@example.com", scope: "read+write" };
+const WRITER: RestCaller = { person: "u1", actor: "ada@example.com", scope: "read+write", kind: "token" };
 const READER: RestCaller = { ...WRITER, scope: "read" };
 
 function req(method: string, path: string, body?: string, base = BASE) {

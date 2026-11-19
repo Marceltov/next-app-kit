@@ -15,8 +15,12 @@ export type Scope = "read" | "read+write";
 
 export type ApiToken = { id: string; name: string; scope: Scope; start: string; created_at: string; expires_at: string | null; last_used_at: string | null };
 
-/** A REST caller: the person's id, what the app records as the actor (the address; "<email> via <client>" for an OAuth token), and what they may do here. */
-export type RestCaller = { person: string; actor: string; scope: Scope };
+/**
+ * A REST caller: the person's id, what the app records as the actor (the address; "<email> via <client>" for an OAuth token), what they
+ * may do here, and how they came: with an API token (`token`) or an OAuth access token for /api/v1 (`oauth`). An app tells the two apart by
+ * `kind`, never by reading `actor` (an app may refuse an API token what it allows a client signed in through OAuth, such as making tokens).
+ */
+export type RestCaller = { person: string; actor: string; scope: Scope; kind: "token" | "oauth" };
 
 export type Outcome = { ok: true } | { ok: false; error: string };
 
@@ -132,7 +136,7 @@ export async function restCaller(req: Request, auth: Auth, signIn: SignInSetting
   if (!person) return null;
   const who = await allowedPerson(signIn, auth, person);
   if (!who) return null;
-  if (client === null) return { person: who.id, actor: who.email, scope };
+  if (client === null) return { person: who.id, actor: who.email, scope, kind: "token" };
   if (!(await connected(auth, person, client))) return null;
-  return { person: who.id, actor: `${who.email} via ${await clientName(auth, client)}`, scope };
+  return { person: who.id, actor: `${who.email} via ${await clientName(auth, client)}`, scope, kind: "oauth" };
 }

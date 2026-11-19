@@ -47,7 +47,7 @@ test("shownOnce", async () => {
   expect(await listApiTokens(h.auth, other)).toEqual([]);
 
   // Using it records when, which the list then shows.
-  expect(await callerOf(made.token)).toEqual({ person: me, actor: "ada@example.com", scope: "read" });
+  expect(await callerOf(made.token)).toEqual({ person: me, actor: "ada@example.com", scope: "read", kind: "token" });
   expect((await listApiTokens(h.auth, me)).find((t) => t.id === made.id)!.last_used_at).not.toBeNull();
 
   // Names: required, at most 60 characters.
@@ -80,8 +80,8 @@ test("expiryDefault90Max365", async () => {
 test("readCannotWrite", async () => {
   const read = await tokenFor(me, "read");
   const write = await tokenFor(me, "read+write");
-  expect(await callerOf(read.token)).toEqual({ person: me, actor: "ada@example.com", scope: "read" });
-  expect(await callerOf(write.token)).toEqual({ person: me, actor: "ada@example.com", scope: "read+write" });
+  expect(await callerOf(read.token)).toEqual({ person: me, actor: "ada@example.com", scope: "read", kind: "token" });
+  expect(await callerOf(write.token)).toEqual({ person: me, actor: "ada@example.com", scope: "read+write", kind: "token" });
   // The scope is the key's permissions on the `api` resource, which the plugin keeps; nothing else grants write.
   const ctx = await h.auth.$context;
   const row = (await ctx.adapter.findOne<{ permissions: unknown }>({ model: "apikey", where: [{ field: "id", value: read.id }] }))!;
@@ -118,7 +118,7 @@ test("mcpTokenRefusedOnRest", async () => {
   // An OAuth access token issued for /api/v1 is a REST caller, with the person's full rights; one for /mcp is not.
   const forApi = await oauthFor(h, `${h.base}/api/v1`, "ada@example.com", { resources: [`${h.base}/api/v1`] });
   // Its actor names the client too, as /mcp's do: records say "<email> via <client>".
-  expect(await callerOf(forApi.tokens.access_token)).toEqual({ person: me, actor: "ada@example.com via Claude", scope: "read+write" });
+  expect(await callerOf(forApi.tokens.access_token)).toEqual({ person: me, actor: "ada@example.com via Claude", scope: "read+write", kind: "oauth" });
   const forMcp = await oauthFor(h, `${h.base}/mcp`, "ada@example.com");
   expect(await callerOf(forMcp.tokens.access_token)).toBeNull();
   // A tampered /api/v1 token, a forged key, no token and a session cookie are no caller either.
