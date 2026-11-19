@@ -7,7 +7,7 @@ import { afterAll, beforeAll, expect, test } from "vitest";
 import { personOf } from "../signin/person.js";
 import { API_TOKEN_PREFIX, cookieOf, oauthFor, signIn, startHarness, type Harness } from "../signin/testing.js";
 import { connections, revokeConnection } from "../mcp/connections.js";
-import { createApiToken, listApiTokens, revokeApiToken, restCaller, type Scope } from "./index.js";
+import { createApiToken, listApiTokens, revokeApiToken, restCaller, tokenForAddress, type Scope } from "./index.js";
 
 let h: Harness;
 let me = "";
@@ -178,4 +178,26 @@ test("removedAddressKeyRefused", async () => {
     h.settings.allowed.splice(at, 0, "leaver@example.com");
   }
   expect((await callerOf(key.token))?.actor).toBe("leaver@example.com");
+});
+
+test("tokenForAddress: the server's operator makes a token for a listed address, also before that person ever signed in; never for another", async () => {
+  // A listed address that never signed in: the person is made, as their first sign-in would make them, and the token is theirs.
+  h.settings.allowed.push("new@example.com");
+  try {
+    expect(await (await h.auth.$context).internalAdapter.findUserByEmail("new@example.com")).toBeNull();
+    const fresh = await tokenForAddress(h.auth, h.settings, { email: "New@Example.com", name: "import", scope: "read+write", expiresInDays: 1 });
+    if ("error" in fresh) throw new Error(fresh.error);
+    expect(await callerOf(fresh.token)).toMatchObject({ actor: "new@example.com", scope: "read+write", kind: "token" });
+  } finally {
+    h.settings.allowed.pop();
+  }
+  // A person who has signed in gets the token on their own account.
+  const mine = await tokenForAddress(h.auth, h.settings, { email: "ada@example.com", name: "site build", scope: "read" });
+  if ("error" in mine) throw new Error(mine.error);
+  expect(await callerOf(mine.token)).toEqual({ person: me, actor: "ada@example.com", scope: "read", kind: "token" });
+  // An address not on the list gets nothing, and no person is made for it.
+  expect(await tokenForAddress(h.auth, h.settings, { email: "eve@elsewhere.example", name: "x", scope: "read" })).toEqual({
+    error: "eve@elsewhere.example may not sign in here: it is not in the allowed addresses",
+  });
+  expect(await (await h.auth.$context).internalAdapter.findUserByEmail("eve@elsewhere.example")).toBeNull();
 });

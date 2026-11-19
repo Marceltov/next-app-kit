@@ -126,6 +126,17 @@ A person's connections are the MCP clients and scripts they allowed: `connection
 
 `next-app-kit/rest`'s table is the API's one source. Each `Op<Ctx>` names its `method`, its `path` under /api/v1 with `{params}` (each one described in `params`, the same names: `openApiDocument` throws otherwise), its `query` (a `z.object`) and `body` schemas, its `ok` answer and listed `errors`, and the tool it mirrors (`tool`) or why none can (`noTool`). Its `handle` gets an `Input<Ctx>`, `{ ctx, base, caller, params, query, body, headers }` (the parsed values, the `RestCaller` and the request's headers), and returns a `Reply`, `{ status, body? }` for JSON or `{ status, raw }` for a Response of its own (a file). The caller's `kind` is `token` (an API token) or `oauth` (an OAuth access token for /api/v1); tell them apart by it, not by `actor`. A `Reply` may carry `etag` (a quoted tag, `"<sha256>"`): it goes out as the ETag header, and a GET or HEAD whose `If-None-Match` names it is answered 304 without the body (a write never is) (`ok.etag: true` documents both; a JSON reply with an ETag is `private, no-cache` instead of `no-store`). `etagMatches(ifNoneMatch, etag)` is there for an app's own file routes. `fail(status, message)` is the `Reply` of a refusal, `{ error, code }` with the code from the status (`400 invalid_input`, `403 forbidden`, `404 not_found`, `409 conflict`); a handler that throws answers 500 `internal` and its message is logged as `api <operationId>: <message>`, so it must not carry a secret. An app's tests call `checkOpsMirrorTools(ops, tools)` and compare `openApiDocument(ops, info)` with its committed `openapi.json`.
 
+## A token from the server
+
+Whoever runs the server can make an API token without a browser: the first one of an app nobody has signed in to yet, or one for a script. It is made in the app's own `auth.sqlite`, from the app's own settings in the environment, only for an address on the allowed list (a person who never signed in is made as their first sign-in would make them), and printed once on stdout:
+
+```sh
+docker exec -u 1000 <container> node node_modules/next-app-kit/dist/cli.js token \
+  --prefix UPLOAD --token-prefix upl_ --email marcel@example.org --name "site build" --scope read --days 365
+```
+
+`--days none` makes one that never expires. In code: `tokenForAddress` from `next-app-kit/tokens`. A Next.js standalone build traces only what the app imports, so an app that wants the command in its image lists `node_modules/next-app-kit/dist/**` in `outputFileTracingIncludes`.
+
 ## Cookies and the app's own routes
 
 The kit's /mcp and /api/v1 take bearer tokens only, never the session cookie, so a page of another site can't drive them. Better Auth's session cookie is `HttpOnly` and `SameSite=Lax`, and the app's own cookie-authenticated POST routes (server actions, route handlers that change something, such as making a token) rely on that: a cross-site POST arrives without the cookie, so it acts for nobody. Keep it that way: don't change the cookie to `SameSite=None`, and don't change anything on a GET.

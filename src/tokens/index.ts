@@ -140,3 +140,4 @@ export async function restCaller(req: Request, auth: Auth, signIn: SignInSetting
   if (!(await connected(auth, person, client))) return null;
   return { person: who.id, actor: `${who.email} via ${await clientName(auth, client)}`, scope, kind: "oauth" };
 }
+export { tokenForAddress } from "./address.js";
