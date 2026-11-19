@@ -13,13 +13,19 @@ export type Guided<T> = T & { guidance: string[] };
 
 const REFUSED: unique symbol = Symbol("refused");
 
-/** A handler's refusal: the call is answered as a tool error carrying `message`, with no result. */
-export type Refused = { readonly [REFUSED]: string };
+/**
+ * A handler's refusal: the call is answered as a tool error carrying `message`, with no result. Its `guidance` (what to do so the call
+ * succeeds next time: what is missing, where to add it) goes along in the error, as a result's would.
+ */
+export type Refused = { readonly [REFUSED]: { message: string; guidance: string[] } };
 
-export const refuse = (message: string): Refused => ({ [REFUSED]: message });
+export const refuse = (message: string, opts?: { guidance?: string[] }): Refused => ({ [REFUSED]: { message, guidance: opts?.guidance ?? [] } });
 
 /** The message of a refusal; null for a result. */
-export const refusalOf = (r: unknown): string | null => (typeof r === "object" && r !== null && REFUSED in r ? (r as Refused)[REFUSED] : null);
+export const refusalOf = (r: unknown): string | null => (typeof r === "object" && r !== null && REFUSED in r ? (r as Refused)[REFUSED].message : null);
+
+/** The guidance a refusal carries; empty for one without, and for a result. */
+export const refusalGuidanceOf = (r: unknown): string[] => (typeof r === "object" && r !== null && REFUSED in r ? (r as Refused)[REFUSED].guidance : []);
 
 /** A defined tool, as mcpRoute serves it. `outputSchema` already has `guidance`. */
 export type Tool = {

@@ -10,7 +10,7 @@ import { McpServer, createMcpHandler, type AuthInfo, type CallToolResult } from 
 import type { Auth, SignInSettings } from "../signin/accounts.js";
 import { allowedPerson } from "../signin/person.js";
 import { clientName, connected } from "./connections.js";
-import { refusalOf, type Tool, type Who } from "./tools.js";
+import { refusalGuidanceOf, refusalOf, type Tool, type Who } from "./tools.js";
 
 /** What /mcp serves: the app's sign-in, its tools, and what the server says about itself. */
 export type McpContext = {
@@ -41,7 +41,20 @@ function serverFor(ctx: McpContext, who: Who): McpServer {
           return { isError: true, content: [{ type: "text", text: "internal error" }] };
         }
         const refused = refusalOf(r);
-        if (refused !== null) return { isError: true, content: [{ type: "text", text: refused }] };
+        if (refused !== null) {
+          // A refusal is its message; its guidance, if any, follows as the second content item and in structuredContent (which MCP does not
+          // check against the output schema for an error), so a client reading either finds it.
+          const guidance = refusalGuidanceOf(r);
+          if (!guidance.length) return { isError: true, content: [{ type: "text", text: refused }] };
+          return {
+            isError: true,
+            structuredContent: { error: refused, guidance },
+            content: [
+              { type: "text", text: refused },
+              { type: "text", text: JSON.stringify({ guidance }) },
+            ],
+          };
+        }
         return { structuredContent: r, content: [{ type: "text", text: JSON.stringify(r) }] };
       },
     );

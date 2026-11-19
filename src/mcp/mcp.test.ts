@@ -9,7 +9,7 @@ import { cookieOf, oauthFor, signIn, startHarness, type Harness } from "../signi
 import { createApiToken } from "../tokens/index.js";
 import { callTool } from "../testing/index.js";
 import { connections, defineTool, mcpRoute, refuse, revokeConnection, type McpContext, type Tool, type Who } from "./index.js";
-import { refusalOf } from "./tools.js";
+import { refusalGuidanceOf, refusalOf } from "./tools.js";
 
 const V = "2026-07-28";
 const META = { "io.modelcontextprotocol/clientInfo": { name: "t", version: "0" }, "io.modelcontextprotocol/clientCapabilities": {} };
@@ -29,10 +29,15 @@ const whoami = defineTool({
 
 const echo = defineTool({
   name: "echo",
-  description: "Says the text back; refuses an empty one.",
+  description: "Says the text back; refuses an empty one, and a lone question mark with guidance.",
   input: z.object({ text: z.string() }),
   output: z.object({ text: z.string() }),
-  handle: async ({ text }) => (text ? { text, guidance: [`Said "${text}".`] } : refuse("nothing to say")),
+  handle: async ({ text }) =>
+    text === "?"
+      ? refuse("a question mark is no text", { guidance: ["Ask the user what to say.", "Then call echo with their words."] })
+      : text
+        ? { text, guidance: [`Said "${text}".`] }
+        : refuse("nothing to say"),
 });
 
 let h: Harness;
@@ -292,6 +297,23 @@ test("inputIsAnObject: a tool's input schema is an object, as MCP's inputSchema 
   expect(scalar).toThrow("scalar: the input schema must be a z.object");
   const tool: Tool = whoami;
   expect(tool.inputSchema).toBeInstanceOf(z.ZodObject);
+});
+
+test("refusalCarriesGuidance: a refusal's guidance reaches the client in the tool error, after its message", async () => {
+  const who: Who = { actor: "someone via Tests", person: "p1", clientId: "c1", base: h.base };
+  const r = await callTool(ctx, who, "echo", { text: "?" });
+  expect(r.isError).toBe(true);
+  expect(r.content).toEqual([
+    { type: "text", text: "a question mark is no text" },
+    { type: "text", text: JSON.stringify({ guidance: ["Ask the user what to say.", "Then call echo with their words."] }) },
+  ]);
+  expect(r.structuredContent).toEqual({ error: "a question mark is no text", guidance: ["Ask the user what to say.", "Then call echo with their words."] });
+  // Without guidance a refusal is its message alone, as before.
+  const bare = await callTool(ctx, who, "echo", { text: "" });
+  expect(bare.content).toEqual([{ type: "text", text: "nothing to say" }]);
+  expect(bare.structuredContent).toBeUndefined();
+  expect(refusalGuidanceOf(refuse("no", { guidance: ["a"] }))).toEqual(["a"]);
+  expect(refusalGuidanceOf(refuse("no"))).toEqual([]);
 });
 
 test("refusalOfAnythingElseIsNull", () => {
