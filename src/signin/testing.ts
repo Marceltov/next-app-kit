@@ -1,4 +1,4 @@
-// What the sign-in tests share (not exported; next-app-kit/testing arrives with Task 7): a real HTTP server in front of Better Auth, because
+// What the kit's own sign-in tests share (not exported; an app's tests use next-app-kit/testing): a real HTTP server in front of Better Auth, because
 // codes, links, cookies and provider redirects only behave as in a browser over HTTP; stand-in OIDC providers served by the same server; and
 // the mail and the log caught in memory. auth.sqlite lives in the test's temporary DATA_DIR, so nothing reaches the network or the disk
 // outside it.

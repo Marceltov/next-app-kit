@@ -349,14 +349,19 @@ function sweepRemoved(s: SignInSettings, database: BetterSqlite3.Database): void
   if (ended > 0) s.log(`sign-in: ended ${ended} sessions and grants of ${gone.length} accounts no longer on ${s.prefix}_ALLOWED_EMAILS`);
 }
 
-const apiTokenPrefixes = new WeakMap<Auth, string>();
+const opened = new WeakMap<Auth, { apiTokenPrefix: string; settings: SignInSettings }>();
+
+function openedBy(auth: Auth) {
+  const found = opened.get(auth);
+  if (!found) throw new Error("this Auth was not made by openAuth");
+  return found;
+}
 
 /** The prefix this instance's API tokens start with (OpenAuthOptions.apiTokenPrefix), for next-app-kit/tokens to tell a key from a JWT. */
-export function apiTokenPrefixOf(auth: Auth): string {
-  const prefix = apiTokenPrefixes.get(auth);
-  if (prefix === undefined) throw new Error("this Auth was not made by openAuth");
-  return prefix;
-}
+export const apiTokenPrefixOf = (auth: Auth): string => openedBy(auth).apiTokenPrefix;
+
+/** The settings this instance was opened with, for what serves it from an Auth alone (next-app-kit/next, next-app-kit/testing). */
+export const signInSettingsOf = (auth: Auth): SignInSettings => openedBy(auth).settings;
 
 /** Opens auth.sqlite, creates or extends Better Auth's own tables as its version and plugins need, and starts it. */
 export async function openAuth(s: SignInSettings, o: OpenAuthOptions): Promise<Auth> {
@@ -373,7 +378,7 @@ export async function openAuth(s: SignInSettings, o: OpenAuthOptions): Promise<A
     await runMigrations();
     sweepRemoved(s, database);
     started.auth = betterAuth(opts);
-    apiTokenPrefixes.set(started.auth, o.apiTokenPrefix);
+    opened.set(started.auth, { apiTokenPrefix: o.apiTokenPrefix, settings: s });
     return started.auth;
   } catch (e) {
     database.close();

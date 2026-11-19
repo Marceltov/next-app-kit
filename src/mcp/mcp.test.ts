@@ -7,7 +7,8 @@ import * as z from "zod";
 import { personOf } from "../signin/person.js";
 import { cookieOf, oauthFor, signIn, startHarness, type Harness } from "../signin/testing.js";
 import { createApiToken } from "../tokens/index.js";
-import { callTool, connections, defineTool, mcpRoute, refuse, revokeConnection, type McpContext, type Tool, type Who } from "./index.js";
+import { callTool } from "../testing/index.js";
+import { connections, defineTool, mcpRoute, refuse, revokeConnection, type McpContext, type Tool, type Who } from "./index.js";
 import { refusalOf } from "./tools.js";
 
 const V = "2026-07-28";

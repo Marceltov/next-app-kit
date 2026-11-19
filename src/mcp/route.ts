@@ -20,7 +20,8 @@ export type McpContext = {
   instructions: string;
 };
 
-const PROTOCOL = "2026-07-28";
+/** The MCP protocol version the endpoint speaks. */
+export const PROTOCOL = "2026-07-28";
 
 function serverFor(ctx: McpContext, who: Who): McpServer {
   const s = new McpServer(ctx.serverInfo, { instructions: ctx.instructions });
@@ -51,8 +52,8 @@ function handlerFor(ctx: McpContext) {
   return h;
 }
 
-/** Answers one MCP request as `who`; the caller has checked who that is. */
-const mcpAs = (req: Request, ctx: McpContext, who: Who): Promise<Response> =>
+/** Answers one MCP request as `who`; the caller has checked who that is. next-app-kit/testing's callTool uses it too. */
+export const mcpAs = (req: Request, ctx: McpContext, who: Who): Promise<Response> =>
   handlerFor(ctx).fetch(req, { authInfo: { token: "", clientId: who.clientId, scopes: [], extra: who } satisfies WhoAuth });
 
 const rpcError = (status: number, message: string, headers?: Record<string, string>) =>
@@ -95,35 +96,4 @@ export async function mcpRoute(req: Request, ctx: McpContext): Promise<Response>
     },
     { resource: `${base}/mcp`, jwksUrl: ctx.signIn.jwksUrl },
   )(req);
-}
-
-/** Calls one tool as `who`, through the MCP server as a client would (schemas and all), without a token: for an app's tests. */
-export async function callTool(ctx: McpContext, who: Who, name: string, input: Record<string, unknown>): Promise<CallToolResult> {
-  const req = new Request(`${who.base}/mcp`, {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      accept: "application/json, text/event-stream",
-      "mcp-protocol-version": PROTOCOL,
-      "mcp-method": "tools/call",
-      "mcp-name": name,
-    },
-    body: JSON.stringify({
-      jsonrpc: "2.0",
-      id: 1,
-      method: "tools/call",
-      params: {
-        name,
-        arguments: input,
-        _meta: {
-          "io.modelcontextprotocol/protocolVersion": PROTOCOL,
-          "io.modelcontextprotocol/clientInfo": { name: "next-app-kit callTool", version: "0" },
-          "io.modelcontextprotocol/clientCapabilities": {},
-        },
-      },
-    }),
-  });
-  const body = (await (await mcpAs(req, ctx, who)).json()) as { result?: CallToolResult; error?: { message: string } };
-  if (!body.result) throw new Error(`${name}: ${body.error?.message ?? "no result"}`);
-  return body.result;
 }

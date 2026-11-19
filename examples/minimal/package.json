@@ -1,0 +1,38 @@
+{
+  "name": "next-app-kit-example-minimal",
+  "private": true,
+  "description": "The smallest Next.js app on next-app-kit: one tool, the REST operation that mirrors it, sign-in and its consent page. CI builds it and runs its Playwright test.",
+  "type": "module",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "typecheck": "next typegen && tsc --noEmit",
+    "test:e2e": "playwright test",
+    "test:absent": "node scripts/absent-in-production.ts"
+  },
+  "dependencies": {
+    "@better-auth/api-key": "1.7.21",
+    "@better-auth/cimd": "1.7.21",
+    "@better-auth/core": "1.7.21",
+    "@better-auth/mcp": "1.7.21",
+    "@better-auth/oauth-provider": "1.7.21",
+    "@better-auth/passkey": "1.7.21",
+    "@modelcontextprotocol/server": "2.4.0",
+    "better-auth": "1.7.21",
+    "better-sqlite3": "13.0.3",
+    "kysely": "0.29.8",
+    "next": "16.4.6",
+    "next-app-kit": "file:../..",
+    "nodemailer": "10.5.0",
+    "react": "19.3.1",
+    "react-dom": "19.3.1",
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.64.1",
+    "@types/node": "26.6.6",
+    "@types/react": "19.3.0",
+    "typescript": "6.0.3"
+  }
+}

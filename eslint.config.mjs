@@ -16,5 +16,5 @@ export default defineConfig([
   { files: ["src/**"], ignores: ["src/next/**"], rules: { "no-restricted-imports": ["error", NO_NEXT] } },
   // Last, so no ESLint rule argues with Prettier's layout.
   prettier,
-  globalIgnores(["dist/**", "coverage/**"]),
+  globalIgnores(["dist/**", "coverage/**", "examples/*/.next/**", "examples/*/next-env.d.ts", "examples/*/test-results/**", "examples/*/playwright-report/**"]),
 ]);

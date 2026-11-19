@@ -20,6 +20,41 @@ Better Auth and its plugins, the MCP SDK, better-sqlite3, kysely, zod, nodemaile
 
 Apps keep their migration list in `backend/db/migrations.ts` and run it with the kit's `migrate` from `next-app-kit/migrations`.
 
+## Route files
+
+`next-app-kit/next` holds the route handlers; each route file of an app is one line over its own runtime (`examples/minimal/backend/app.ts`). Each handler takes a getter, asked at the first request (so `next build` opens no database) and only once, unless it threw:
+
+| Route file                                                        | Export                                                                                         |
+| ----------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| `app/api/auth/[...all]/route.ts`                                  | `export const { GET, POST } = authHandler(auth)`                                               |
+| `app/.well-known/oauth-authorization-server/[...issuer]/route.ts` | `export const GET = wellKnownHandlers(auth).authorizationServer`                               |
+| `app/.well-known/openid-configuration/[...issuer]/route.ts`       | `export const GET = wellKnownHandlers(auth).openidConfiguration`                               |
+| `app/.well-known/oauth-protected-resource/[...path]/route.ts`     | `export const GET = wellKnownHandlers(auth).protectedResource` (of `/api/v1` and `/mcp`)       |
+| `app/mcp/route.ts`                                                | `export const { POST, GET, DELETE } = mcpHandler(async () => (await app()).mcp)`               |
+| `app/api/v1/[...path]/route.ts`                                   | `export const { GET, POST, PUT, PATCH, DELETE } = restHandler(async () => (await app()).rest)` |
+| `app/api/test/sign-in/route.ts`                                   | `export const GET = testSignInRoute("PREFIX", auth)` (from `next-app-kit/testing`)             |
+
+## The consent page
+
+The kit ships no UI. During an MCP client's or a script's OAuth sign-in, Better Auth sends the signed-in person to `/consent` (openAuth's `pages.consent`); copy [`examples/minimal/app/consent/`](examples/minimal/app/consent/) (the page and its `ConsentForm`) and [`app/auth-client.ts`](examples/minimal/app/auth-client.ts) into the app and give them its own words and styles. The page uses `personOf` and `clientNameFor` from `next-app-kit/signin`; the form answers with `authClient.oauth2.consent({ accept })`.
+
+## Tests
+
+`next-app-kit/testing`, for an app's tests and its end-to-end run:
+
+- `freshAuth(prefix, { allowed? })`: Better Auth with its `auth.sqlite` in the test's temporary `DATA_DIR`, the sign-in mail caught in `mail`.
+- `signedInCookie(auth, email)`: signs a person on the allowlist in through Better Auth's server side and returns the session cookie as a `cookie` header carries it.
+- `testSignInRoute(prefix, auth)`: `GET ?email=…&next=/path` signs the browser in, for Playwright against `next dev`. It returns a handler only with `<PREFIX>_E2E=1` outside production; under `NODE_ENV=production` it returns `undefined`, so the route file exports no `GET`, and the handler is compiled out of the production build (`examples/minimal` checks both in CI: `npm run test:absent`).
+- `callTool(ctx, who, name, input)`: runs one MCP tool as `who`, through the MCP server, without a token.
+
+## Example
+
+[`examples/minimal`](examples/minimal) is the smallest app on the kit: one tool, the REST operation that mirrors it, the route files above and the consent page. It installs the kit from `../..` as a copy of what the kit ships (`install-links=true`), so build the kit first. CI (job `example`) builds it and runs its Playwright test:
+
+```sh
+npm run build && cd examples/minimal && npm ci && npm run build && npm run test:absent && npm run test:e2e
+```
+
 ## Multipart uploads
 
 `readMultipart(req, { maxFileBytes, maxFiles, types?, tmpDir? })` from `next-app-kit/multipart` leaves each file in a temporary folder and throws a `MultipartError` carrying the status to answer with. The folder is removed on every failure; after a success it is the app's to remove, so call `cleanup()` in a `finally`:

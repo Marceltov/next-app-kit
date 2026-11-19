@@ -21,3 +21,44 @@ jobs:
       - run: npm run typecheck
       - run: npm test
       - run: npm run build
+  # The Playwright version the example's lockfile pins, so the example job runs in the image made for exactly that version.
+  playwright:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+      - id: version
+        run: echo "version=$(node -p 'require("./examples/minimal/package-lock.json").packages["node_modules/@playwright/test"].version')" >> "$GITHUB_OUTPUT"
+  # The kit in a real Next.js app (examples/minimal): built, its test sign-in route shown absent from the production build, and its
+  # Playwright test run against `next dev`. In Microsoft's Playwright image, which has the browsers and their system libraries built in, so
+  # no apt mirror can fail it (noticebox ADR 0006); setup-node still pins .nvmrc's Node. Main requires this job too (the ruleset).
+  example:
+    needs: playwright
+    runs-on: ubuntu-latest
+    container: mcr.microsoft.com/playwright:v${{ needs.playwright.outputs.version }}-noble
+    defaults:
+      run:
+        working-directory: examples/minimal
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            examples/minimal/package-lock.json
+      # The example installs the kit as a copy of what it would ship (install-links), so the kit is built first.
+      - run: npm ci && npm run build
+        working-directory: .
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run build
+      - run: npm run test:absent
+      - run: npm run test:e2e
+      - uses: actions/upload-artifact@v7
+        if: failure()
+        with:
+          name: playwright-report
+          path: examples/minimal/playwright-report

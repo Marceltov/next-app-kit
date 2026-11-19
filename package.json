@@ -33,6 +33,14 @@
     "./multipart": {
       "types": "./dist/multipart/index.d.ts",
       "default": "./dist/multipart/index.js"
+    },
+    "./next": {
+      "types": "./dist/next/index.d.ts",
+      "default": "./dist/next/index.js"
+    },
+    "./testing": {
+      "types": "./dist/testing/index.d.ts",
+      "default": "./dist/testing/index.js"
     }
   },
   "files": [
