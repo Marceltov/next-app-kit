@@ -21,6 +21,9 @@ jobs:
       - run: npm run typecheck
       - run: npm test
       - run: npm run build
+      # What release.yml attaches to a release, made on every push too, so a broken step shows before a tag needs it.
+      - run: npm pack --dry-run
+      - run: npm sbom --package-lock-only --omit dev --sbom-format cyclonedx > /dev/null
   # The Playwright version the example's lockfile pins, so the example job runs in the image made for exactly that version.
   playwright:
     runs-on: ubuntu-latest

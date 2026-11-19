@@ -21,7 +21,7 @@ Security fixes go into a new release, and only the newest release gets them. The
 
 ## What each release carries
 
-The kit is installed from a tag's archive, not from a registry, and ships no image. Each GitHub release carries `next-app-kit-X.Y.Z-npm.cdx.json`, a CycloneDX SBOM of the dependencies the kit is built and tested against (its peers, which an app installs at the same exact versions). Read it with any CycloneDX tool, or as JSON:
+The kit is installed from the tarball attached to each GitHub release (`next-app-kit-X.Y.Z.tgz`, what `npm pack` makes), not from a registry, and ships no image. Each release also carries `next-app-kit-X.Y.Z-npm.cdx.json`, a CycloneDX SBOM of the kit's own run-time dependencies (`npm sbom --package-lock-only --omit dev`). Its peers (Better Auth and its plugins, the MCP SDK, Next.js, better-sqlite3, kysely, nodemailer, zod) are not in it: an app installs them itself, at the exact versions in the kit's `package.json`, so they are in the app's SBOM. Read it with any CycloneDX tool, or as JSON:
 
 ```sh
 gh release download vX.Y.Z --repo Marceltov/next-app-kit --pattern '*.cdx.json'

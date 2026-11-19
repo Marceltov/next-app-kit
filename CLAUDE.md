@@ -22,6 +22,12 @@ cd examples/minimal && npm ci && npm run typecheck && npm run build && npm run t
 
 CI (`.github/workflows/ci.yml`) has two jobs `main` requires through a ruleset: `check` (format:check, lint, typecheck, test, build) and `example` (the example app built, its test sign-in route shown absent from the production build, its Playwright test against `next dev`, in the Playwright image of the version the example's lockfile pins).
 
+Release (`.github/workflows/release.yml`, on the tag): set `version` in `package.json` (and `npm install` in `examples/minimal` for its lockfile), commit on `main`, then tag with a headline and push the tag; the workflow checks the tag against `package.json`, runs the checks, attaches `next-app-kit-X.Y.Z.tgz` (`npm pack`, what apps install) and `next-app-kit-X.Y.Z-npm.cdx.json` (SBOM) to a GitHub release with generated notes. Nothing is published from here.
+
+```sh
+git tag -a vX.Y.Z -m "A headline for the people who use it" && git push origin vX.Y.Z
+```
+
 Dependabot (`.github/dependabot.yml`) opens weekly grouped bumps; patch and minor ones merge by themselves once `check` and `example` are green (`dependabot-automerge.yml`), the one exception to merging only when the maintainer says so. Majors wait for review.
 
 ## Architecture
@@ -35,7 +41,7 @@ Dependabot (`.github/dependabot.yml`) opens weekly grouped bumps; patch and mino
 ## Rules
 
 - Follows Marceltov/engineering-conventions; the rules here win where they differ.
-- Peer dependencies are exact and also devDependencies at the same version (`src/package.test.ts`); Better Auth, its plugins, the MCP SDK and Next.js move together, here first, then in the apps; `examples/minimal/package.json` pins the same versions and moves in the same commit (Dependabot doesn't watch it).
+- Peer dependencies are exact and also devDependencies at the same version (`src/package.test.ts`); Better Auth, its plugins, the MCP SDK and Next.js move together, here first, then in the apps; `examples/minimal/package.json` pins the same versions and moves in the same commit (Dependabot watches the example's own dependencies, not its peers). If Dependabot's peer group bumps the devDependencies but not the exact peerDependencies, finish the pull request by hand.
 - Behaviour stays noticebox's unless a decision here says otherwise.
 - Settings an app reads are `<PREFIX>_*` with the app's prefix, plus `PUBLIC_URL`, `DATA_DIR`, `PORT`, `TZ`.
 - MCP results carry `guidance: string[]`.

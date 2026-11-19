@@ -1,0 +1,75 @@
+# A release is an annotated tag vX.Y.Z on main whose message starts with a headline (conventions: Releases). Nothing is published from a
+# laptop: the tag push runs this. The kit is not on npm; apps install the `npm pack` tarball attached to the release (GitHub's own archive of
+# a tag holds no dist/). The release also carries the CycloneDX SBOM of what the kit depends on at run time (conventions: Security setup).
+name: release
+on:
+  push:
+    tags: ["v*"]
+permissions:
+  contents: read
+jobs:
+  # Checks and build as CI runs them, then the two files the release carries. Read-only: the job that installs packages can't write.
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - name: The tag is package.json's version
+        run: |
+          version=$(node -p 'require("./package.json").version')
+          [ "$GITHUB_REF_NAME" = "v$version" ] || { echo "::error::tag $GITHUB_REF_NAME, but package.json says $version"; exit 1; }
+      - run: npm ci
+      - run: npm run format:check
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+      - name: Package and SBOM
+        run: |
+          version=${GITHUB_REF_NAME#v}
+          mkdir release
+          npm pack --pack-destination release
+          npm sbom --package-lock-only --omit dev --sbom-format cyclonedx > "release/next-app-kit-$version-npm.cdx.json"
+          ls -l release
+      - uses: actions/upload-artifact@v7
+        with:
+          name: release
+          path: release/
+          retention-days: 1
+
+  # The release: the tag's headline as the first line, the install line, then the pull requests since the last tag. A re-run skips a
+  # release that already exists.
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      TAG: ${{ github.ref_name }}
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: release
+          path: release
+      - name: Write the release notes
+        run: |
+          ref=$(gh api "repos/$GH_REPO/git/ref/tags/$TAG")
+          [ "$(jq -r .object.type <<<"$ref")" = tag ] || { echo "::error::$TAG is a lightweight tag: tag with git tag -a and a headline"; exit 1; }
+          headline=$(gh api "repos/$GH_REPO/git/tags/$(jq -r .object.sha <<<"$ref")" --jq .message | head -n 1)
+          [ -n "$headline" ] || { echo "::error::$TAG has no headline"; exit 1; }
+          {
+            printf '%s\n\n' "$headline"
+            printf '```sh\nnpm install https://github.com/%s/releases/download/%s/next-app-kit-%s.tgz\n```\n\n' "$GH_REPO" "$TAG" "${TAG#v}"
+            gh api "repos/$GH_REPO/releases/generate-notes" -f tag_name="$TAG" --jq .body
+          } > notes.md
+          cat notes.md
+      - name: Make the GitHub release
+        run: |
+          gh release view "$TAG" > /dev/null 2>&1 && { echo "Release $TAG exists"; exit 0; }
+          prerelease=; [[ $TAG == *-* ]] && prerelease=--prerelease
+          gh release create "$TAG" --verify-tag --title "next-app-kit ${TAG#v}" --notes-file notes.md $prerelease release/*

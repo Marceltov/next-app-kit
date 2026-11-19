@@ -31,6 +31,39 @@ updates:
       minor-and-patch:
         update-types: [minor, patch]
 
+  # The example app's own dependencies (React, Playwright, its types). The kit's peers are pinned there at the kit's exact versions and move
+  # with the kit's, by hand in the same pull request (README, "Peers move together"), so they are left out here.
+  - package-ecosystem: npm
+    directory: /examples/minimal
+    schedule:
+      interval: weekly
+      day: monday
+      time: "05:00"
+      timezone: Europe/Berlin
+    cooldown:
+      default-days: 14
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: Dependencies
+    labels: [dependencies]
+    ignore:
+      - dependency-name: next-app-kit
+      - dependency-name: better-auth
+      - dependency-name: "@better-auth/*"
+      - dependency-name: "@modelcontextprotocol/server"
+      - dependency-name: next
+      - dependency-name: better-sqlite3
+      - dependency-name: kysely
+      - dependency-name: nodemailer
+      - dependency-name: zod
+      - dependency-name: "@types/node"
+        update-types: [version-update:semver-major]
+      - dependency-name: typescript
+        versions: [">=7"]
+    groups:
+      minor-and-patch:
+        update-types: [minor, patch]
+
   - package-ecosystem: github-actions
     directory: /
     schedule:

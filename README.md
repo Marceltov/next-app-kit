@@ -2,19 +2,65 @@
 
 Sign-in, API tokens, the MCP endpoint and its OAuth, REST with its OpenAPI document, migrations and multipart uploads for Next.js apps: the infrastructure each of [Marceltov](https://github.com/Marceltov)'s apps carried as its own copy, extracted from [noticebox](https://github.com/noticebox/noticebox) so it lives once.
 
-**Status:** in development; nothing to install before `v0.1.0`.
+## What is in it
+
+One entry point per part; only `next-app-kit/next` imports Next.js.
+
+| Entry point               | What it holds                                                                                                                                                                                                  |
+| ------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `next-app-kit/signin`     | Better Auth in its own `auth.sqlite`: the allowlist, a code or link by email, passkeys, OIDC providers, the OAuth server for MCP clients and scripts (`signInFromEnv`, `openAuth`, `personOf`, `stillAllowed`) |
+| `next-app-kit/tokens`     | API tokens, hashed, scoped `read` or `read+write`, 90 days by default and at most 365 (`createApiToken`, `listApiTokens`, `revokeApiToken`, `restCaller`)                                                      |
+| `next-app-kit/mcp`        | The MCP endpoint (Streamable HTTP, POST only): origin and token checks, tools whose results carry `guidance: string[]`, connected clients (`defineTool`, `refuse`, `mcpRoute`, `connections`)                  |
+| `next-app-kit/rest`       | The REST route table under `/api/v1` and its OpenAPI document; every operation mirrors a tool or names why not (`Op`, `restRoute`, `openApiDocument`, `checkOpsMirrorTools`)                                   |
+| `next-app-kit/multipart`  | Multipart uploads into a temporary folder, with limits (`readMultipart`, `MultipartError`)                                                                                                                     |
+| `next-app-kit/migrations` | The migrations runner (`migrate`)                                                                                                                                                                              |
+| `next-app-kit/next`       | The route handlers (`authHandler`, `wellKnownHandlers`, `mcpHandler`, `restHandler`)                                                                                                                           |
+| `next-app-kit/testing`    | Signing in for tests and end-to-end runs, calling a tool (`freshAuth`, `signedInCookie`, `testSignInRoute`, `callTool`)                                                                                        |
 
 ## Install
 
-Not on npm; install a tag's archive from GitHub (no git or SSH key needed in CI, and the lockfile pins its hash):
+Not on npm. Each [release](https://github.com/Marceltov/next-app-kit/releases) carries the package as `npm pack` makes it (`dist/` included; GitHub's archive of a tag has no `dist/`). Install it by its URL, with the peers at the versions the kit's `package.json` names; no git or SSH key is needed in CI, and the lockfile pins its hash:
 
 ```sh
-npm install https://github.com/Marceltov/next-app-kit/archive/refs/tags/vX.Y.Z.tar.gz
+npm install https://github.com/Marceltov/next-app-kit/releases/download/v0.1.0/next-app-kit-0.1.0.tgz
 ```
+
+## Settings
+
+An app passes its prefix (`UPLOAD`, `NOTICEBOX`, …) and the kit reads only `<PREFIX>_*`, plus `PUBLIC_URL`, `PORT` and `NODE_ENV`; the app passes where `auth.sqlite` lives (in its `DATA_DIR`). `signInFromEnv` checks the settings at start and names what is missing.
+
+| Variable                                                                | What it does                                                                                                                                                          |
+| ----------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `PUBLIC_URL`                                                            | The app's public URL, which sign-in links, OAuth metadata and MCP tokens name. Required (outside a dev user).                                                         |
+| `<PREFIX>_SECRET`                                                       | Better Auth's secret, at least 32 characters (`openssl rand -base64 48`). Required (outside a dev user).                                                              |
+| `<PREFIX>_ALLOWED_EMAILS`                                               | Who may sign in: addresses and `@domain` entries, comma-separated. Empty means nobody. An address taken off the list loses its sessions and grants at the next start. |
+| `<PREFIX>_SMTP_URL`, `<PREFIX>_SMTP_FROM`                               | Sign-in by email (a code; in the browser also a link). Without SMTP, a provider is needed.                                                                            |
+| `<PREFIX>_OIDC_<NAME>_CLIENT_ID`, `_CLIENT_SECRET`, `_ISSUER`, `_LABEL` | A sign-in provider. `GITHUB`, `GOOGLE` and `APPLE` are built in (no issuer); any other name is an OIDC provider and needs `_ISSUER`, the discovery base.              |
+| `<PREFIX>_DEV_USER`                                                     | Development only: everyone reaching the app is this person. Refused under `NODE_ENV=production`.                                                                      |
+| `<PREFIX>_E2E`                                                          | `1` turns the test sign-in route on, outside production only (`next-app-kit/testing`).                                                                                |
+| `PORT`                                                                  | The port the app listens on: the MCP endpoint checks tokens against the app's own JWKS there.                                                                         |
+
+## Wiring an app
+
+[`examples/minimal`](examples/minimal) is the smallest app on the kit; copy from it:
+
+1. `backend/app.ts`: the runtime. `signInFromEnv` with the app's prefix, `openAuth` with the API token prefix and the sign-in mail's texts, the tools (`defineTool`) and the operations that mirror them (`Op`), the `log` function (pino in an app), all opened once at the first request.
+2. The route files in [Route files](#route-files), one line each.
+3. The consent page and the auth client ([The consent page](#the-consent-page)), in the app's own words and styles. The sign-in page and the token page are the app's: the example shows who is signed in and makes a token (`app/page.tsx`, `TokenForm.tsx`, `actions.ts`) but has no sign-in page; `signInMethods` says what one offers.
+4. The test sign-in route and the Playwright setup (`app/api/test/sign-in/route.ts`, `playwright.config.ts`, `scripts/absent-in-production.ts`).
+5. The app's own migrations in `backend/db/migrations.ts` ([Migrations](#migrations)).
 
 ## Peers move together
 
-Better Auth and its plugins, the MCP SDK, better-sqlite3, kysely, zod, nodemailer and (for `next-app-kit/next` only) Next.js are peer dependencies at exact versions. An app installs the same versions; upgrading one of them alone fails the install instead of running two copies. They are upgraded here first, then in the apps, together.
+Better Auth and its plugins (`@better-auth/*`, `@better-auth/core` included), the MCP SDK, better-sqlite3, kysely, zod, nodemailer and (for `next-app-kit/next` only) Next.js are peer dependencies at exact versions. An app installs the same versions; upgrading one of them alone fails the install instead of running two copies. They are upgraded here first, in one release, then in the apps, together.
+
+Dependabot groups the peers into one pull request. If it bumps the `devDependencies` but not the exact `peerDependencies` beside them, `src/package.test.ts` fails and the bump is finished by hand: the peer version, and the same version in `examples/minimal/package.json` (whose peers Dependabot leaves alone), in the same pull request.
+
+## Known gaps
+
+- A tool's result is its structured content and nothing else: it can't carry extra content blocks (an image, a resource) yet. noticebox's `get_file` needs that before noticebox can adopt the kit.
+- `callTool` lives in `next-app-kit/testing`, not `next-app-kit/mcp`: it runs a tool without a token, so only tests use it.
+- The kit ships no UI: the sign-in page, the token page and the consent page are the app's.
 
 ## Migrations
 
@@ -67,6 +113,10 @@ try {
   await upload.cleanup();
 }
 ```
+
+## Decisions
+
+Why the kit exists, what it was extracted from and what changed on the way: [ADR 0001](docs/adr/0001-shared-infrastructure-lives-once-in-next-app-kit.md).
 
 ## License
 
