@@ -17,7 +17,7 @@ npm run build                              # tsc -p tsconfig.build.json → dist
 
 ```sh
 # examples/minimal: the kit in a real Next.js app (build the kit first; it is installed as a copy, install-links=true)
-cd examples/minimal && npm ci && npm run typecheck && npm run build && npm run test:absent && npm run test:e2e
+cd examples/minimal && npm ci && npm run typecheck && npm run test:peers && npm run build && npm run test:absent && npm run test:e2e
 ```
 
 CI (`.github/workflows/ci.yml`) has two jobs `main` requires through a ruleset: `check` (format:check, lint, typecheck, test, build) and `example` (the example app built, its test sign-in route shown absent from the production build, its Playwright test against `next dev`, in the Playwright image of the version the example's lockfile pins).

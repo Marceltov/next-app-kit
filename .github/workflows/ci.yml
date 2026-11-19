@@ -57,6 +57,7 @@ jobs:
         working-directory: .
       - run: npm ci
       - run: npm run typecheck
+      - run: npm run test:peers
       - run: npm run build
       - run: npm run test:absent
       - run: npm run test:e2e

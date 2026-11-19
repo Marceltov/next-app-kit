@@ -18,6 +18,8 @@ import type { Who } from "../mcp/tools.js";
 import { openAuth, safeNext, type Auth, type SignInSettings } from "../signin/accounts.js";
 import type { MailTexts, SignInMail } from "../signin/mail.js";
 
+export { checkPeers } from "./peers.js";
+
 export type FreshAuth = {
   auth: Auth;
   signIn: SignInSettings;

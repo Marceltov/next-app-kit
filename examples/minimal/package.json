@@ -9,7 +9,8 @@
     "start": "next start",
     "typecheck": "next typegen && tsc --noEmit",
     "test:e2e": "playwright test",
-    "test:absent": "node scripts/absent-in-production.ts"
+    "test:absent": "node scripts/absent-in-production.ts",
+    "test:peers": "node scripts/peers.ts"
   },
   "dependencies": {
     "@better-auth/api-key": "1.7.21",

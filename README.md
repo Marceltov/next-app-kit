@@ -15,7 +15,7 @@ One entry point per part; only `next-app-kit/next` imports Next.js.
 | `next-app-kit/multipart`  | Multipart uploads into a temporary folder, with limits (`readMultipart`, `MultipartError`)                                                                                                                     |
 | `next-app-kit/migrations` | The migrations runner (`migrate`)                                                                                                                                                                              |
 | `next-app-kit/next`       | The route handlers (`authHandler`, `wellKnownHandlers`, `mcpHandler`, `restHandler`)                                                                                                                           |
-| `next-app-kit/testing`    | Signing in for tests and end-to-end runs, calling a tool (`freshAuth`, `signedInCookie`, `testSignInRoute`, `callTool`)                                                                                        |
+| `next-app-kit/testing`    | Signing in for tests and end-to-end runs, calling a tool, checking the peers (`freshAuth`, `signedInCookie`, `testSignInRoute`, `callTool`, `checkPeers`)                                                      |
 
 ## Install
 
@@ -53,6 +53,17 @@ An app passes its prefix (`UPLOAD`, `NOTICEBOX`, …) and the kit reads only `<P
 ## Peers move together
 
 Better Auth and its plugins (`@better-auth/*`, `@better-auth/core` included), the MCP SDK, better-sqlite3, kysely, zod, nodemailer and (for `next-app-kit/next` only) Next.js are peer dependencies at exact versions. An app installs the same versions; upgrading one of them alone fails the install instead of running two copies. They are upgraded here first, in one release, then in the apps, together.
+
+npm's refusal is the guard, and an app's `legacy-peer-deps=true` (in `.npmrc` or the environment) switches it off: then two copies run side by side and break quietly. So an app must not set `legacy-peer-deps`, and calls `checkPeers()` from `next-app-kit/testing` in one unit test; it compares each peer installed in the app's `node_modules` (found as Node finds it) with the kit's exact version and throws naming every mismatch and every missing peer (an optional peer, `next`, may be absent):
+
+```ts
+import { checkPeers } from "next-app-kit/testing";
+import { test } from "vitest";
+
+test("next-app-kit's peers are at its versions", () => checkPeers());
+```
+
+The example runs it as `npm run test:peers`.
 
 Dependabot groups the peers into one pull request. If it bumps the `devDependencies` but not the exact `peerDependencies` beside them, `src/package.test.ts` fails and the bump is finished by hand: the peer version, and the same version in `examples/minimal/package.json` (whose peers Dependabot leaves alone), in the same pull request.
 
@@ -92,13 +103,14 @@ The kit ships no UI. During an MCP client's or a script's OAuth sign-in, Better 
 - `signedInCookie(auth, email)`: signs a person on the allowlist in through Better Auth's server side (creating them on first use) and returns the session cookie as a `cookie` header carries it. An address not on the list, or taken off it since, throws `SignInRefused`; any other failure throws as it is.
 - `testSignInRoute(prefix, auth)`: `GET ?email=…&next=/path` signs the browser in, for Playwright against `next dev` (403 for an address the allowlist refuses, 500 for any other failure). It returns a handler only with `<PREFIX>_E2E=1` outside production; under `NODE_ENV=production` it returns `undefined`, so the route file exports no `GET`, and the handler is compiled out of the production build (`examples/minimal` checks both in CI: `npm run test:absent`).
 - `callTool(ctx, who, name, input)`: runs one MCP tool as `who`, through the MCP server, without a token.
+- `checkPeers(appDir?)`: throws unless every peer the kit names is installed at its exact version ([Peers move together](#peers-move-together)); `appDir` defaults to the working directory.
 
 ## Example
 
 [`examples/minimal`](examples/minimal) is the smallest app on the kit: one tool, the REST operation that mirrors it, the route files above and the consent page. It installs the kit from `../..` as a copy of what the kit ships (`install-links=true`), so build the kit first. CI (job `example`) builds it and runs its Playwright test:
 
 ```sh
-npm run build && cd examples/minimal && npm ci && npm run build && npm run test:absent && npm run test:e2e
+npm run build && cd examples/minimal && npm ci && npm run test:peers && npm run build && npm run test:absent && npm run test:e2e
 ```
 
 ## Multipart uploads
