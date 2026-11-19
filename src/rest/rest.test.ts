@@ -346,6 +346,25 @@ test("conditionalGet: an operation returns its ETag, and a request that holds it
   const unchanged = await get("/things/x", { "if-none-match": '"x-1"' });
   expect(unchanged.status).toBe(304);
   expect(unchanged.headers.get("cache-control")).toBe("private, no-cache");
+  // Only a GET or HEAD is answered 304: a write that happens to return an ETag the caller holds still gets its answer.
+  const put = { ...tagged[1]!, method: "PUT", operationId: "putThing" } as Op<Ctx>;
+  const written = await restRoute(
+    new Request(`${BASE}/api/v1/things/x`, { method: "PUT", headers: { "if-none-match": '"x-1"', "content-type": "application/json" }, body: "{}" }),
+    [put],
+    { things: [] },
+    WRITER,
+    SETTINGS,
+  );
+  expect(written.status).toBe(200);
+  expect(await written.json()).toEqual({ name: "x" });
+  const head = await restRoute(
+    new Request(`${BASE}/api/v1/files/a`, { method: "HEAD", headers: { "if-none-match": '"v1"' } }),
+    tagged,
+    { things: [] },
+    READER,
+    SETTINGS,
+  );
+  expect(head.status).toBe(304);
   // The document says so: the ETag header and a 304.
   const doc = openApiDocument(tagged, { title: "T", version: "1", serverUrl: BASE }) as {
     paths: Record<string, Record<string, { responses: Record<string, { headers?: Record<string, unknown> }> }>>;

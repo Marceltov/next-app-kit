@@ -21,7 +21,7 @@ export const MAX_BODY_BYTES = 256 * 1024;
 
 /**
  * A handler's answer: JSON (`body`), nothing (no `body`), or a Response of its own that is not JSON, such as a file (`raw`). `etag` (a
- * quoted entity tag, `"<hash>"`) goes out as the ETag header; on a GET's 200 a request whose If-None-Match names it is answered 304.
+ * quoted entity tag, `"<hash>"`) goes out as the ETag header; on a GET's or HEAD's 200 a request whose If-None-Match names it is answered 304.
  */
 export type Reply = { status: number; body?: unknown; raw?: Response; etag?: string };
 
@@ -161,7 +161,9 @@ export async function restRoute<Ctx>(req: Request, ops: Op<Ctx>[], ctx: Ctx, cal
   const send = (r: Reply) => {
     // A reply with an ETag may be kept and asked about again; any other JSON is never stored.
     const cache = r.raw?.headers.get("cache-control") ?? (r.etag ? "private, no-cache" : "no-store");
-    if (r.etag && r.status === 200 && etagMatches(req.headers.get("if-none-match"), r.etag)) {
+    // Only a read is answered 304 (RFC 9110 13.1.2): a write that returns an ETag its caller already held still sends its answer.
+    const read = req.method === "GET" || req.method === "HEAD";
+    if (read && r.etag && r.status === 200 && etagMatches(req.headers.get("if-none-match"), r.etag)) {
       void r.raw?.body?.cancel();
       return new Response(null, { status: 304, headers: { etag: r.etag, "cache-control": cache } });
     }
