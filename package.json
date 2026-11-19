@@ -1,6 +1,6 @@
 {
   "name": "next-app-kit",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "description": "Sign-in, API tokens, the MCP endpoint and its OAuth, REST with OpenAPI, migrations and multipart uploads for Next.js apps: the infrastructure every app shares, in one library.",
   "license": "Apache-2.0",
   "author": "Marcel Bruckner",
@@ -42,6 +42,9 @@
       "types": "./dist/testing/index.d.ts",
       "default": "./dist/testing/index.js"
     }
+  },
+  "bin": {
+    "next-app-kit": "dist/cli.js"
   },
   "files": [
     "dist"
