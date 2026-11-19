@@ -50,16 +50,11 @@ export function renderMail(texts: Record<string, MailTexts>, mail: SignInMail): 
   return { subject: t.subject(mail.code), text: t.body(mail.code, mail.link) };
 }
 
-export function smtpMailer(smtp: Smtp, opts: { texts: Record<string, MailTexts>; log: (line: string) => void }): Mailer {
+/** Sends through SMTP. A failed send throws and logs nothing: openAuth logs it, once, without the address. */
+export function smtpMailer(smtp: Smtp, opts: { texts: Record<string, MailTexts> }): Mailer {
   return async (mail) => {
     const { subject, text } = renderMail(opts.texts, mail);
-    try {
-      const { createTransport } = await import("nodemailer");
-      await createTransport({ url: smtp.url, ...TIMEOUTS }).sendMail({ from: smtp.from, to: mail.to, subject, text });
-    } catch (e) {
-      // The error may name the address: only its code is logged.
-      opts.log(`mail: sending a sign-in code failed (${(e as NodeJS.ErrnoException).code ?? "unknown"})`);
-      throw e;
-    }
+    const { createTransport } = await import("nodemailer");
+    await createTransport({ url: smtp.url, ...TIMEOUTS }).sendMail({ from: smtp.from, to: mail.to, subject, text });
   };
 }

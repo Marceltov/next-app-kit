@@ -1,4 +1,4 @@
-// Sign-in mail: the app's texts in the reader's language, and a failed send that logs neither the address nor the code.
+// Sign-in mail: the app's texts in the reader's language, and a failed send that throws.
 import { createServer } from "node:net";
 import { expect, test } from "vitest";
 import { mailLanguage, renderMail, smtpMailer } from "./mail.js";
@@ -26,16 +26,13 @@ test("renderMail", () => {
   });
 });
 
-test("failedSendLogsNoAddressOrCode", async () => {
-  // A local server that hangs up at once: the send fails without leaving this machine.
+test("failedSendThrows", async () => {
+  // A local server that hangs up at once: the send fails without leaving this machine. The mailer throws and logs nothing; openAuth logs
+  // the failure once, without the address (accounts.test.ts: smtpFailureLogsOneLine).
   const server = createServer((socket) => socket.destroy());
   await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
   const port = (server.address() as { port: number }).port;
-  const logs: string[] = [];
-  const send = smtpMailer({ url: `smtp://127.0.0.1:${port}`, from: "app@example.org" }, { texts: TEXTS, log: (l) => void logs.push(l) });
+  const send = smtpMailer({ url: `smtp://127.0.0.1:${port}`, from: "app@example.org" }, { texts: TEXTS });
   await expect(send({ to: "ada@example.com", code: "987654", link: undefined, language: "en" })).rejects.toThrow();
   server.close();
-  expect(logs).toHaveLength(1);
-  expect(logs[0]).toMatch(/^mail: sending a sign-in code failed \(/);
-  expect(logs[0]).not.toMatch(/ada@|987654/);
 });

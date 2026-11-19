@@ -333,3 +333,30 @@ test("mailFailureIsAnError: a sign-in mail that could not be sent is not answere
   expect(off.status).toBe(400);
   expect(await off.json()).toMatchObject({ code: "EMAIL_SIGN_IN_OFF" });
 });
+
+test("smtpFailureLogsOneLine: one failed send through SMTP is one line in the log", async () => {
+  // A local server that hangs up at once: the send fails without leaving this machine.
+  const { createServer } = await import("node:net");
+  const server = createServer((socket) => socket.destroy());
+  await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
+  const port = (server.address() as { port: number }).port;
+  const logs: string[] = [];
+  const settings = {
+    ...h.settings,
+    file: join(freshDir("smtpfail"), "auth.sqlite"),
+    log: (l: string) => void logs.push(l),
+    mailer: undefined,
+    smtp: { url: `smtp://127.0.0.1:${port}`, from: "app@example.org" },
+  };
+  const auth = await openAuth(settings, { apiTokenPrefix: API_TOKEN_PREFIX, texts: TEXTS });
+  const r = await auth.handler(
+    new Request(`${h.base}/api/auth/email-otp/send-verification-otp`, {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: h.base },
+      body: JSON.stringify({ email: "ada@example.com", type: "sign-in" }),
+    }),
+  );
+  server.close();
+  expect(r.status).toBe(502);
+  expect(logs.filter((l) => /could not be sent|failed \(/.test(l))).toEqual([expect.stringMatching(/^error: sign-in mail could not be sent \(/)]);
+});

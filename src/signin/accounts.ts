@@ -147,7 +147,7 @@ async function adapterIn(ctx: unknown): Promise<Lookup | null> {
 }
 
 function options(s: SignInSettings, o: OpenAuthOptions, database: BetterSqlite3.Database, self: () => Auth) {
-  const mail = s.mailer ?? (s.smtp ? smtpMailer(s.smtp, { texts: o.texts, log: s.log }) : null);
+  const mail = s.mailer ?? (s.smtp ? smtpMailer(s.smtp, { texts: o.texts }) : null);
   const languages = Object.keys(o.texts);
   if (languages.length === 0) throw new Error("openAuth needs the sign-in mail texts of at least one language");
   const languageOf = (headers: Headers | undefined): string => {
