@@ -44,7 +44,7 @@ An app passes its prefix (`UPLOAD`, `NOTICEBOX`, …) and the kit reads only `<P
 
 [`examples/minimal`](examples/minimal) is the smallest app on the kit; copy from it:
 
-1. `backend/app.ts`: the runtime. `signInFromEnv` with the app's prefix, `openAuth` with the API token prefix and the sign-in mail's texts, the tools (`defineTool`) and the operations that mirror them (`Op`), the `log` function (pino in an app), all opened once at the first request. The MCP context (`McpContext`) and the REST app (`RestApp`) both take `log`: a tool that throws is logged as `mcp <tool>: <message>` and its client gets only `internal error` (a `refuse(…)` is no error: its message reaches the client and nothing is logged).
+1. `backend/app.ts`: the runtime. `signInFromEnv` with the app's prefix, `openAuth` with the API token prefix and the sign-in mail's texts (`texts`, one set per language; [The sign-in mail's language](#the-sign-in-mails-language)), the tools (`defineTool`) and the operations that mirror them (`Op`), the `log` function (pino in an app), all opened once at the first request. The MCP context (`McpContext`) and the REST app (`RestApp`) both take `log`: a tool that throws is logged as `mcp <tool>: <message>` and its client gets only `internal error` (a `refuse(…)` is no error: its message reaches the client and nothing is logged).
 2. The route files in [Route files](#route-files), one line each.
 3. The sign-in page ([The sign-in page](#the-sign-in-page)), the consent page and the auth client ([The consent page](#the-consent-page)), in the app's own words and styles. The sign-in page and the token page are the app's: the example shows who is signed in and makes a token (`app/page.tsx`, `TokenForm.tsx`, `actions.ts`) but has no sign-in page (it names one, `/sign-in`, as `pages.signIn`); `signInMethods` says what one offers.
 4. The test sign-in route and the Playwright setup (`app/api/test/sign-in/route.ts`, `playwright.config.ts`, `scripts/absent-in-production.ts`).
@@ -100,6 +100,16 @@ The kit ships no UI; the sign-in page is the app's, at the path it gives `openAu
 - **Each provider's `errorCallbackURL` carries `provider=<id>`** (and `next`): `${signInPage}?provider=${id}&next=${encodeURIComponent(next)}`. A provider's refusal comes back to it as `?error=`, and `refusedSignIn(query, signIn)` turns the query into what the page may show: `{ provider, code }` with the provider's label (only a provider of this instance) and an OAuth-shaped code (`unknown_error` otherwise); `error_description` is never shown. The kit has already logged the refusal with the provider's name.
 - **The auth client has these plugins:** `emailOTPClient()` (`better-auth/client/plugins`), `passkeyClient()` (`@better-auth/passkey/client`) and `oauthProviderClient()` (`@better-auth/oauth-provider/client`). The last carries an MCP client's signed query along with every request from the page, which is how the kit tells an MCP or script sign-in apart: without it, such a sign-in mails a link as well as the code, and the authorize step does not continue after it. OIDC providers need no client plugin of their own in Better Auth 1.7 (there is no `genericOAuthClient`): `signIn.social` takes their ids. [`app/auth-client.ts`](examples/minimal/app/auth-client.ts) is the copy-in source.
 
+## The sign-in mail's language
+
+The sign-in mail is written in one of the languages of `openAuth`'s `texts` (the first is the fallback). By default the kit picks it from the `Accept-Language` of the request that asked for the code (`mailLanguage`). An app with a language switch passes its own pick as `languageOf(headers)`, the same function its pages use, so the mail speaks the language the sign-in page did:
+
+```ts
+const auth = await openAuth(signIn, { apiTokenPrefix: "upl_", texts: { en, de }, pages: { signIn: "/signin" }, languageOf: languageFrom });
+```
+
+`languageOf` gets the request's headers (its cookies included) and returns a key of `texts`; anything else gets the first.
+
 ## The consent page
 
 The kit ships no UI. During an MCP client's or a script's OAuth sign-in, Better Auth sends the signed-in person to `/consent` (openAuth's `pages.consent`); someone not signed in who opens it is sent to the sign-in page openAuth was given, with the consent page and its query as `?next=`. Copy [`examples/minimal/app/consent/`](examples/minimal/app/consent/) (the page and its `ConsentForm`) and [`app/auth-client.ts`](examples/minimal/app/auth-client.ts) into the app and give them its own words and styles. The page uses `personOf` and `clientNameFor` from `next-app-kit/signin`; the form answers with `authClient.oauth2.consent({ accept })`.
@@ -138,7 +148,7 @@ npm run build && cd examples/minimal && npm ci && npm run test:peers && npm run 
 
 ## Multipart uploads
 
-`readMultipart(req, { maxFileBytes, maxFiles, types?, tmpDir? })` from `next-app-kit/multipart` leaves each file in a temporary folder and throws a `MultipartError` carrying the status to answer with. The folder is removed on every failure; after a success it is the app's to remove, so call `cleanup()` in a `finally`:
+`readMultipart(req, { maxFileBytes, maxFiles, types?, tmpDir? })` from `next-app-kit/multipart` leaves each file in a temporary folder and throws a `MultipartError` carrying the status to answer with and a `code` saying which problem it is: `too_large` (413: a file over `maxFileBytes`, or the post or its text fields too large), `wrong_type` (a file not in `types`), `too_many` (more files than `maxFiles`, or too many fields or parts), `empty` (a file without bytes), `not_multipart` (the body is no multipart form) and `aborted` (the request broke off or was aborted before its end), all 400 but the first. An app words its answer by the code; the English message is for its log. The folder is removed on every failure; after a success it is the app's to remove, so call `cleanup()` in a `finally`:
 
 ```ts
 const upload = await readMultipart(req, { maxFileBytes: 20 * 1024 * 1024, maxFiles: 10, types: ["image/*"] });

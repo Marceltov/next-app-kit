@@ -1,6 +1,7 @@
 // Sign-in mail: a code, and a link to sign in with when there may be one (accounts.ts decides: never during an MCP or script sign-in),
 // through the app's <PREFIX>_SMTP_URL. The words are the app's (`texts`, one set per language it speaks); the kit holds no copy of its own,
-// and picks the language from the Accept-Language of the request that asked for the code. Logs neither the address nor the code nor the
+// and the language is the one the request that asked for the code prefers: its Accept-Language, or the app's own pick (openAuth's
+// `languageOf`, for an app with a language switch). Logs neither the address nor the code nor the
 // link (conventions: stacks/nextjs, logs). Tests pass a Mailer of their own instead of SMTP.
 
 export type Smtp = { url: string; from: string };

@@ -85,7 +85,7 @@ test("oversizeRefused413: a file over maxFileBytes is cut off as it arrives, ans
   });
   const req = new Request("http://test.invalid/upload", { method: "POST", body, headers: multipartHeaders, duplex: "half" } as RequestInit);
   const e = await refused(readMultipart(req, { maxFileBytes: 1024 * 1024, maxFiles: 1, tmpDir: dir }));
-  expect(e.status).toBe(413);
+  expect([e.status, e.code]).toEqual([413, "too_large"]);
   expect(e.message).toMatch(/huge\.bin is larger than 1 MB/);
   expect(sent).toBeLessThan(3 * 1024 * 1024);
   expect(readdirSync(dir)).toEqual([]);
@@ -119,7 +119,7 @@ test("abortedRequestLeavesNoTempFile: the body breaking off halfway removes what
   });
   const req = new Request("http://test.invalid/upload", { method: "POST", body, headers: multipartHeaders, duplex: "half" } as RequestInit);
   const e = await refused(readMultipart(req, { maxFileBytes: 1024 * 1024, maxFiles: 1, tmpDir: dir }));
-  expect(e.status).toBe(400);
+  expect([e.status, e.code]).toEqual([400, "aborted"]);
   expect(readdirSync(dir)).toEqual([]);
 });
 
@@ -140,7 +140,7 @@ test("abortedRequestLeavesNoTempFile: an abort signal on a body that just stops 
     signal: controller.signal,
   } as RequestInit);
   const e = await refused(readMultipart(req, { maxFileBytes: 1024 * 1024, maxFiles: 1, tmpDir: dir }));
-  expect(e.status).toBe(400);
+  expect([e.status, e.code]).toEqual([400, "aborted"]);
   expect(readdirSync(dir)).toEqual([]);
 });
 
@@ -159,7 +159,7 @@ test("abortedRequestLeavesNoTempFile: a request already aborted before it is rea
     signal: AbortSignal.abort(),
   } as RequestInit);
   const e = await refused(readMultipart(req, { maxFileBytes: 1024 * 1024, maxFiles: 1, tmpDir: dir }));
-  expect(e.status).toBe(400);
+  expect([e.status, e.code]).toEqual([400, "aborted"]);
   expect(readdirSync(dir)).toEqual([]);
 }, 2000);
 
@@ -220,4 +220,31 @@ test("a file's own name is kept without a path, control characters or quotes", (
   expect(safeName('a"b\u0001.stl')).toBe("ab.stl");
   expect(safeName("..")).toBe("file");
   expect(safeName("x".repeat(200))).toHaveLength(120);
+});
+
+test("everyRefusalCarriesItsCode: an app tells refusals apart by code, never by message", async () => {
+  const dir = uploads();
+  const opts = { maxFileBytes: 100, maxFiles: 1, tmpDir: dir, types: ["image/jpeg"] };
+  const codeOf = async (req: Request) => {
+    const e = await refused(readMultipart(req, opts));
+    return [e.status, e.code];
+  };
+  expect(await codeOf(await post({}, [["photo", file("a.jpg", 101, "image/jpeg")]]))).toEqual([413, "too_large"]);
+  expect(await codeOf(await post({ big: "x".repeat(70 * 1024) }))).toEqual([413, "too_large"]);
+  expect(await codeOf(await post({}, [["photo", file("a.heic", 5, "image/heic")]]))).toEqual([400, "wrong_type"]);
+  expect(
+    await codeOf(
+      await post({}, [
+        ["photo", file("a.jpg", 5, "image/jpeg")],
+        ["photo", file("b.jpg", 5, "image/jpeg")],
+      ]),
+    ),
+  ).toEqual([400, "too_many"]);
+  expect(await codeOf(await post({}, [["photo", file("a.jpg", 0, "image/jpeg")]]))).toEqual([400, "empty"]);
+  expect(await codeOf(new Request("http://test.invalid/upload", { method: "POST", body: "{}", headers: { "content-type": "application/json" } }))).toEqual([
+    400,
+    "not_multipart",
+  ]);
+  expect(await codeOf(new Request("http://test.invalid/upload", { method: "POST" }))).toEqual([400, "not_multipart"]);
+  expect(readdirSync(dir)).toEqual([]);
 });

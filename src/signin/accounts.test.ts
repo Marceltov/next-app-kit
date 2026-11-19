@@ -2,8 +2,10 @@
 // named by, linking a second provider, a provider's refusal, passkeys, and an MCP client's OAuth dance down to its token. Better Auth runs
 // for real over an auth.sqlite in the test's temporary DATA_DIR; only the mail is caught, and the OIDC providers are stand-ins served by
 // the same test server.
+import { join } from "node:path";
 import { afterAll, beforeAll, expect, test } from "vitest";
 import { emailAllowed, openAuth, safeNext, type Auth } from "./accounts.js";
+import { mailLanguage, type SignInMail } from "./mail.js";
 import { personOf, stillAllowed } from "./person.js";
 import { clientNameFor, refusedSignIn } from "./routes.js";
 import {
@@ -11,6 +13,7 @@ import {
   TEXTS,
   audienceOf,
   cookieOf,
+  freshDir,
   json,
   oauthFor,
   sendCode,
@@ -252,4 +255,28 @@ test("apiTokenPrefixNotEmptyNorJwtLike", async () => {
   // A key must be told apart from a JWT by its prefix alone, and every JWT starts with "ey".
   for (const apiTokenPrefix of ["", "ey", "eyx_"])
     await expect(openAuth({ ...h.settings, file: ":memory:" }, { apiTokenPrefix, texts: TEXTS })).rejects.toThrow(/apiTokenPrefix/);
+});
+
+test("languageOfPicksTheMailLanguage", async () => {
+  // An app with a language switch passes languageOf: its cookie wins over Accept-Language. Without it, Accept-Language alone decides.
+  const mail = new Map<string, SignInMail>();
+  const settings = { ...h.settings, file: join(freshDir("lang"), "auth.sqlite"), mailer: async (m: SignInMail) => void mail.set(m.to, m) };
+  const languageOf = (headers: Headers) =>
+    /(?:^|;\s*)lang=(\w+)/.exec(headers.get("cookie") ?? "")?.[1] ?? mailLanguage(headers.get("accept-language"), ["en", "de"]);
+  const auth = await openAuth(settings, { apiTokenPrefix: API_TOKEN_PREFIX, texts: TEXTS, languageOf });
+  const send = async (headers: Record<string, string>) => {
+    const r = await auth.handler(
+      new Request(`${h.base}/api/auth/email-otp/send-verification-otp`, {
+        method: "POST",
+        headers: { "content-type": "application/json", origin: h.base, ...headers },
+        body: JSON.stringify({ email: "ada@example.com", type: "sign-in" }),
+      }),
+    );
+    expect(r.status).toBe(200);
+    return mail.get("ada@example.com")!.language;
+  };
+  expect(await send({ cookie: "lang=en", "accept-language": "de" })).toBe("en");
+  expect(await send({ "accept-language": "de-DE" })).toBe("de");
+  // A language the app has no texts in gets its first.
+  expect(await send({ cookie: "lang=fr" })).toBe("en");
 });

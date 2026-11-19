@@ -57,6 +57,12 @@ export type OpenAuthOptions = {
   texts: Record<string, MailTexts>;
   /** The app's sign-in and consent pages (noticebox's by default). */
   pages?: { signIn?: string; consent?: string };
+  /**
+   * The language of the sign-in mail, from the headers of the request that asked for the code: one of the keys of `texts` (anything else
+   * gets the first). Default: the reader's Accept-Language (`mailLanguage`). An app with a language switch passes the same pick its pages
+   * use, so the mail speaks the language the page did.
+   */
+  languageOf?: (headers: Headers) => string;
 };
 
 /** Seconds an MCP access token lives: a JWT can't be revoked before it expires, so it is short and the client refreshes it. */
@@ -133,6 +139,11 @@ function options(s: SignInSettings, o: OpenAuthOptions, database: BetterSqlite3.
   const mail = s.mailer ?? (s.smtp ? smtpMailer(s.smtp, { texts: o.texts, log: s.log }) : null);
   const languages = Object.keys(o.texts);
   if (languages.length === 0) throw new Error("openAuth needs the sign-in mail texts of at least one language");
+  const languageOf = (headers: Headers | undefined): string => {
+    const h = headers ?? new Headers();
+    const picked = o.languageOf ? o.languageOf(h) : mailLanguage(h.get("accept-language"), languages);
+    return languages.includes(picked) ? picked : languages[0]!;
+  };
   const signInPage = o.pages?.signIn ?? "/login";
   const builtIn = (id: string) => s.providers.find((p) => p.id === id && p.issuer === null);
   const github = builtIn("github");
@@ -300,7 +311,7 @@ function options(s: SignInSettings, o: OpenAuthOptions, database: BetterSqlite3.
           // During an MCP or script sign-in (the sign-in page's signed query came along) the mail holds only the code: a link would sign
           // in whichever browser opens it, not the one the authorization waits in.
           const link = (await stateOr(oauthSignIn, false)) ? undefined : await signInLink(email, headers);
-          await mail({ to: email, code: otp, link, language: mailLanguage(headers?.get("accept-language"), languages) });
+          await mail({ to: email, code: otp, link, language: languageOf(headers) });
         },
       }),
       magicLink({
