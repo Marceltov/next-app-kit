@@ -17,6 +17,10 @@
     "./signin": {
       "types": "./dist/signin/index.d.ts",
       "default": "./dist/signin/index.js"
+    },
+    "./tokens": {
+      "types": "./dist/tokens/index.d.ts",
+      "default": "./dist/tokens/index.js"
     }
   },
   "files": [
