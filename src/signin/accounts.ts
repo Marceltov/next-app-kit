@@ -99,7 +99,8 @@ const refusal = defineRequestState((): Refusal | null => null);
 /**
  * Whether the sign-in mail of this request went out. Better Auth awaits the mail but swallows its failure and answers `{success: true}`,
  * so the page said "code sent" when nothing was: the send notes the failure here, and the after hook answers the request with an error
- * instead (502 `MAIL_NOT_SENT`; 400 `EMAIL_SIGN_IN_OFF` when this instance mails nothing).
+ * instead (502 `MAIL_NOT_SENT`; 400 `EMAIL_SIGN_IN_OFF` when this instance mails nothing). Until a mail goes out again, an address not on the
+ * list is answered MAIL_NOT_SENT too.
  */
 const mailProblem = defineRequestState((): "failed" | "off" | null => null);
 
@@ -155,6 +156,9 @@ function options(s: SignInSettings, o: OpenAuthOptions, database: BetterSqlite3.
     return languages.includes(picked) ? picked : languages[0]!;
   };
   const signInPage = o.pages?.signIn ?? "/login";
+  // Whether the last sign-in mail failed. While it did, every request for a code or link is answered MAIL_NOT_SENT, an address on the list
+  // or not: answering only the listed ones with the failure would tell a stranger who may sign in. The next mail that goes out clears it.
+  let mailFailing = false;
   const builtIn = (id: string) => s.providers.find((p) => p.id === id && p.issuer === null);
   const github = builtIn("github");
   const google = builtIn("google");
@@ -320,15 +324,21 @@ function options(s: SignInSettings, o: OpenAuthOptions, database: BetterSqlite3.
         sendVerificationOTP: async ({ email, otp, type }: { email: string; otp: string; type: string }, ctx?: { request?: Request }) => {
           if (type !== "sign-in") return;
           if (!mail) return void (await mailProblem.set("off").catch(() => {}));
-          // No mail to an address that may not sign in: nobody can use the app to send mail to strangers.
-          if (!emailAllowed(s.allowed, email)) return;
+          // No mail to an address that may not sign in: nobody can use the app to send mail to strangers. Its answer is the one a listed
+          // address would get now.
+          if (!emailAllowed(s.allowed, email)) {
+            if (mailFailing) await mailProblem.set("failed").catch(() => {});
+            return;
+          }
           const headers = ctx?.request?.headers;
           // During an MCP or script sign-in (the sign-in page's signed query came along) the mail holds only the code: a link would sign
           // in whichever browser opens it, not the one the authorization waits in.
           const link = (await stateOr(oauthSignIn, false)) ? undefined : await signInLink(email, headers);
           try {
             await mail({ to: email, code: otp, link, language: languageOf(headers) });
+            mailFailing = false;
           } catch (e) {
+            mailFailing = true;
             // The error may name the address: only its code is logged.
             s.log(`error: sign-in mail could not be sent (${(e as NodeJS.ErrnoException).code ?? "unknown"})`);
             await mailProblem.set("failed").catch(() => {});

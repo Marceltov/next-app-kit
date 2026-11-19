@@ -308,10 +308,16 @@ test("mailFailureIsAnError: a sign-in mail that could not be sent is not answere
   // Logged at error level, without the address.
   expect(logs.filter((l) => l.startsWith("error: sign-in mail could not be sent"))).toHaveLength(1);
   expect(logs.join("\n")).not.toContain("ada@example.com");
-  // An address that may not sign in still gets the same answer as one that may: nothing was to be sent, so nothing failed.
-  expect((await send("eve@elsewhere.example")).status).toBe(200);
+  // While mail is failing, an address that may not sign in gets the same answer as one that may: the answer tells nobody who is on the list.
+  const stranger = await send("eve@elsewhere.example");
+  expect(stranger.status).toBe(502);
+  expect(await stranger.json()).toMatchObject({ code: "MAIL_NOT_SENT" });
+  // The next send that goes out clears it, for everyone.
   failing = false;
   expect((await send()).status).toBe(200);
+  expect((await send("eve@elsewhere.example")).status).toBe(200);
+  // Each failed send logged one line.
+  expect(logs.filter((l) => l.includes("could not be sent") || l.includes("failed ("))).toHaveLength(1);
   // An instance that mails nothing says so, too, rather than "sent".
   const silent = await openAuth(
     { ...settings, file: join(freshDir("nomail"), "auth.sqlite"), mailer: undefined, smtp: null },
