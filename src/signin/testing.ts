@@ -2,7 +2,7 @@
 // codes, links, cookies and provider redirects only behave as in a browser over HTTP; stand-in OIDC providers served by the same server; and
 // the mail and the log caught in memory. auth.sqlite lives in the test's temporary DATA_DIR, so nothing reaches the network or the disk
 // outside it.
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { mkdtempSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
@@ -176,3 +176,72 @@ export async function viaProvider(h: Harness, name: string, profile: Record<stri
   back.searchParams.set("state", to.searchParams.get("state")!);
   return fetch(back, { redirect: "manual", headers: { cookie: jar } });
 }
+export type Meta = {
+  registration_endpoint: string;
+  authorization_endpoint: string;
+  token_endpoint: string;
+  code_challenge_methods_supported: string[];
+  grant_types_supported: string[];
+};
+
+/** The whole OAuth dance for `resource` as an MCP client or a script does it, signed in as `email` with a mailed code. */
+export async function oauthFor(h: Harness, resource: string, email: string, extra: Record<string, unknown> = {}) {
+  const meta = (await (await fetch(`${h.base}/.well-known/oauth-authorization-server/api/auth`)).json()) as Meta;
+  const redirect = "https://client.example/cb";
+  const reg = await fetch(meta.registration_endpoint, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      client_name: "Claude",
+      redirect_uris: [redirect],
+      token_endpoint_auth_method: "none",
+      grant_types: ["authorization_code", "refresh_token"],
+      response_types: ["code"],
+      ...extra,
+    }),
+  });
+  expect(reg.status).toBe(201);
+  const { client_id } = (await reg.json()) as { client_id: string };
+  const verifier = randomBytes(32).toString("base64url");
+  const authorize = new URL(meta.authorization_endpoint);
+  for (const [k, v] of Object.entries({
+    response_type: "code",
+    client_id,
+    redirect_uri: redirect,
+    scope: "openid offline_access",
+    state: "st",
+    code_challenge: createHash("sha256").update(verifier).digest("base64url"),
+    code_challenge_method: "S256",
+    resource,
+  }))
+    authorize.searchParams.set(k, v);
+  const toLogin = await fetch(authorize, { redirect: "manual", headers: { accept: "text/html" } });
+  const login = new URL(toLogin.status === 302 ? toLogin.headers.get("location")! : ((await toLogin.json()) as { url: string }).url, h.base);
+  expect(login.pathname).toBe("/login");
+  const signed = await signIn(h, email, login.search.slice(1));
+  expect(signed.status).toBe(200);
+  const sent = h.mail.get(email)!;
+  const cookie = cookieOf(signed);
+  const consent = new URL(((await signed.json()) as { url: string }).url, h.base);
+  expect(consent.pathname).toBe("/consent");
+  const consented = await fetch(`${h.base}/api/auth/oauth2/consent`, json(h, { accept: true, oauth_query: consent.search.slice(1) }, { cookie }));
+  expect(consented.status).toBe(200);
+  const back = new URL(((await consented.json()) as { url: string }).url);
+  expect(back.origin + back.pathname).toBe(redirect);
+  const token = await fetch(meta.token_endpoint, {
+    method: "POST",
+    headers: { "content-type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      grant_type: "authorization_code",
+      code: back.searchParams.get("code")!,
+      redirect_uri: redirect,
+      client_id,
+      code_verifier: verifier,
+      resource,
+    }),
+  });
+  expect(token.status).toBe(200);
+  return { meta, sent, client_id, cookie, tokens: (await token.json()) as { access_token: string; refresh_token: string; expires_in: number } };
+}
+
+export const audienceOf = (jwt: string) => (JSON.parse(Buffer.from(jwt.split(".")[1]!, "base64url").toString()) as { aud: string | string[] }).aud;

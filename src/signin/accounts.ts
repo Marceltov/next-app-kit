@@ -241,11 +241,16 @@ function options(s: SignInSettings, o: OpenAuthOptions, database: BetterSqlite3.
           // The allowlist and the verified address hold at every sign-in, not only the first: an address taken off the list can't sign
           // in again, by code, link, provider or passkey. Better Auth writes the client's address and browser into every session;
           // nothing reads them, so neither is stored.
+          // Outside a request (a server-side call, with no hook context) there is no transaction adapter; the connection itself is asked
+          // then, which sees what any open transaction on it wrote. The check never skips itself.
           before: async (session: Record<string, unknown>, ctx: unknown) => {
             const adapter = await adapterIn(ctx);
-            const user = adapter ? await adapter.findOne({ model: "user", where: [{ field: "id", value: String(session.userId) }] }) : null;
-            if (adapter && (!user || !emailAllowed(s.allowed, String(user.email)))) return refuse(s, "email_not_allowed", "a session");
-            if (adapter && !user!.emailVerified) return refuse(s, "email_not_verified", "a session");
+            const id = String(session.userId);
+            const user = adapter
+              ? await adapter.findOne({ model: "user", where: [{ field: "id", value: id }] })
+              : ((database.prepare(`select "email", "emailVerified" from "user" where "id" = ?`).get(id) as Record<string, unknown> | undefined) ?? null);
+            if (!user || !emailAllowed(s.allowed, String(user.email))) return refuse(s, "email_not_allowed", "a session");
+            if (!user.emailVerified) return refuse(s, "email_not_verified", "a session");
             return { data: { ...session, ...UNTRACKED } };
           },
         },
@@ -344,6 +349,15 @@ function sweepRemoved(s: SignInSettings, database: BetterSqlite3.Database): void
   if (ended > 0) s.log(`sign-in: ended ${ended} sessions and grants of ${gone.length} accounts no longer on ${s.prefix}_ALLOWED_EMAILS`);
 }
 
+const apiTokenPrefixes = new WeakMap<Auth, string>();
+
+/** The prefix this instance's API tokens start with (OpenAuthOptions.apiTokenPrefix), for next-app-kit/tokens to tell a key from a JWT. */
+export function apiTokenPrefixOf(auth: Auth): string {
+  const prefix = apiTokenPrefixes.get(auth);
+  if (prefix === undefined) throw new Error("this Auth was not made by openAuth");
+  return prefix;
+}
+
 /** Opens auth.sqlite, creates or extends Better Auth's own tables as its version and plugins need, and starts it. */
 export async function openAuth(s: SignInSettings, o: OpenAuthOptions): Promise<Auth> {
   if (s.file !== ":memory:") mkdirSync(dirname(s.file), { recursive: true });
@@ -357,6 +371,7 @@ export async function openAuth(s: SignInSettings, o: OpenAuthOptions): Promise<A
     await runMigrations();
     sweepRemoved(s, database);
     started.auth = betterAuth(opts);
+    apiTokenPrefixes.set(started.auth, o.apiTokenPrefix);
     return started.auth;
   } catch (e) {
     database.close();

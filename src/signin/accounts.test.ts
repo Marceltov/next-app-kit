@@ -2,12 +2,24 @@
 // named by, linking a second provider, a provider's refusal, passkeys, and an MCP client's OAuth dance down to its token. Better Auth runs
 // for real over an auth.sqlite in the test's temporary DATA_DIR; only the mail is caught, and the OIDC providers are stand-ins served by
 // the same test server.
-import { createHash, randomBytes } from "node:crypto";
 import { afterAll, beforeAll, expect, test } from "vitest";
 import { emailAllowed, openAuth, safeNext, type Auth } from "./accounts.js";
-import { personOf } from "./person.js";
+import { personOf, stillAllowed } from "./person.js";
 import { clientNameFor, refusedSignIn } from "./routes.js";
-import { API_TOKEN_PREFIX, TEXTS, cookieOf, json, sendCode, signIn, startHarness, startProvider, viaProvider, type Harness } from "./testing.js";
+import {
+  API_TOKEN_PREFIX,
+  TEXTS,
+  audienceOf,
+  cookieOf,
+  json,
+  oauthFor,
+  sendCode,
+  signIn,
+  startHarness,
+  startProvider,
+  viaProvider,
+  type Harness,
+} from "./testing.js";
 
 let h: Harness;
 const ALLOWED = ["ada@example.com", "marcel@example.com", "leaver@example.com", "@team.example"];
@@ -169,6 +181,37 @@ test("removedAddressLosesSession", async () => {
   expect((await personOf(new Headers({ cookie: kept }), restarted))?.email).toBe("ada@example.com");
 });
 
+test("removedAddressLosesSessionAtNextLook", async () => {
+  // The list changed under a running app (the settings object is the one Better Auth reads): the next look at the session ends it.
+  h.settings.allowed.push("brief@example.com");
+  const cookie = cookieOf(await signIn(h, "brief@example.com"));
+  const me = (await personOf(new Headers({ cookie }), h.auth))!;
+  expect(me.email).toBe("brief@example.com");
+  expect(await stillAllowed(h.settings, h.auth, me.id)).toBe(true);
+  h.settings.allowed.splice(h.settings.allowed.indexOf("brief@example.com"), 1);
+  expect(await stillAllowed(h.settings, h.auth, me.id)).toBe(false);
+  expect(await stillAllowed(h.settings, h.auth, "no-such-user")).toBe(false);
+  expect(await personOf(new Headers({ cookie }), h.auth)).toBeNull();
+  const ctx = await h.auth.$context;
+  expect(await ctx.adapter.findMany({ model: "session", where: [{ field: "userId", value: me.id }] })).toEqual([]);
+});
+
+test("sessionRefusedOutsideRequest", async () => {
+  // A session made server-side, outside any request (no hook context, no transaction adapter), still passes the allowlist check.
+  const ctx = await h.auth.$context;
+  const now = new Date();
+  const make = (email: string, emailVerified = true) =>
+    ctx.adapter.create<Record<string, unknown>>({ model: "user", data: { email, name: email, emailVerified, createdAt: now, updatedAt: now } });
+  const eve = await make("eve-direct@example.com");
+  const unverified = await make("unverified@team.example", false);
+  const ada = (await ctx.internalAdapter.findUserByEmail("ada@example.com"))!.user;
+  expect(await ctx.internalAdapter.createSession(String(eve.id)).catch(() => null)).toBeNull();
+  expect(await ctx.internalAdapter.createSession(String(unverified.id)).catch(() => null)).toBeNull();
+  expect(await ctx.adapter.findMany({ model: "session", where: [{ field: "userId", value: String(eve.id) }] })).toEqual([]);
+  expect(await ctx.adapter.findMany({ model: "session", where: [{ field: "userId", value: String(unverified.id) }] })).toEqual([]);
+  expect((await ctx.internalAdapter.createSession(ada.id))?.userId).toBe(ada.id);
+});
+
 test("devUserWithoutSession", async () => {
   expect(await personOf(new Headers(), h.auth)).toBeNull();
   expect(await personOf(new Headers(), h.auth, "dev@example.com")).toEqual({ id: "dev:dev@example.com", email: "dev@example.com" });
@@ -177,78 +220,8 @@ test("devUserWithoutSession", async () => {
   expect((await personOf(new Headers({ cookie }), h.auth, "dev@example.com"))?.email).toBe("ada@example.com");
 });
 
-type Meta = {
-  registration_endpoint: string;
-  authorization_endpoint: string;
-  token_endpoint: string;
-  code_challenge_methods_supported: string[];
-  grant_types_supported: string[];
-};
-
-/** The whole OAuth dance for `resource` as an MCP client or a script does it, signed in as `email` with a mailed code. */
-async function oauthFor(resource: string, email: string, extra: Record<string, unknown> = {}) {
-  const meta = (await (await fetch(`${h.base}/.well-known/oauth-authorization-server/api/auth`)).json()) as Meta;
-  const redirect = "https://client.example/cb";
-  const reg = await fetch(meta.registration_endpoint, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({
-      client_name: "Claude",
-      redirect_uris: [redirect],
-      token_endpoint_auth_method: "none",
-      grant_types: ["authorization_code", "refresh_token"],
-      response_types: ["code"],
-      ...extra,
-    }),
-  });
-  expect(reg.status).toBe(201);
-  const { client_id } = (await reg.json()) as { client_id: string };
-  const verifier = randomBytes(32).toString("base64url");
-  const authorize = new URL(meta.authorization_endpoint);
-  for (const [k, v] of Object.entries({
-    response_type: "code",
-    client_id,
-    redirect_uri: redirect,
-    scope: "openid offline_access",
-    state: "st",
-    code_challenge: createHash("sha256").update(verifier).digest("base64url"),
-    code_challenge_method: "S256",
-    resource,
-  }))
-    authorize.searchParams.set(k, v);
-  const toLogin = await fetch(authorize, { redirect: "manual", headers: { accept: "text/html" } });
-  const login = new URL(toLogin.status === 302 ? toLogin.headers.get("location")! : ((await toLogin.json()) as { url: string }).url, h.base);
-  expect(login.pathname).toBe("/login");
-  const signed = await signIn(h, email, login.search.slice(1));
-  expect(signed.status).toBe(200);
-  const sent = h.mail.get(email)!;
-  const cookie = cookieOf(signed);
-  const consent = new URL(((await signed.json()) as { url: string }).url, h.base);
-  expect(consent.pathname).toBe("/consent");
-  const consented = await fetch(`${h.base}/api/auth/oauth2/consent`, json(h, { accept: true, oauth_query: consent.search.slice(1) }, { cookie }));
-  expect(consented.status).toBe(200);
-  const back = new URL(((await consented.json()) as { url: string }).url);
-  expect(back.origin + back.pathname).toBe(redirect);
-  const token = await fetch(meta.token_endpoint, {
-    method: "POST",
-    headers: { "content-type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({
-      grant_type: "authorization_code",
-      code: back.searchParams.get("code")!,
-      redirect_uri: redirect,
-      client_id,
-      code_verifier: verifier,
-      resource,
-    }),
-  });
-  expect(token.status).toBe(200);
-  return { meta, sent, client_id, cookie, tokens: (await token.json()) as { access_token: string; refresh_token: string; expires_in: number } };
-}
-
-const audienceOf = (jwt: string) => (JSON.parse(Buffer.from(jwt.split(".")[1]!, "base64url").toString()) as { aud: string | string[] }).aud;
-
 test("mcpSignInMailsOnlyCode", async () => {
-  const { meta, sent, client_id, cookie, tokens } = await oauthFor(`${h.base}/mcp`, "ada@example.com");
+  const { meta, sent, client_id, cookie, tokens } = await oauthFor(h, `${h.base}/mcp`, "ada@example.com");
   expect(meta.code_challenge_methods_supported).toContain("S256");
   expect(meta.grant_types_supported).not.toContain("client_credentials");
   // During an MCP sign-in the mail holds only the code: a link would sign in whichever browser opens it.
@@ -260,7 +233,7 @@ test("mcpSignInMailsOnlyCode", async () => {
 });
 
 test("eachResourceGetsItsOwnToken", async () => {
-  const { tokens } = await oauthFor(`${h.base}/api/v1`, "ada@example.com", { resources: [`${h.base}/api/v1`] });
+  const { tokens } = await oauthFor(h, `${h.base}/api/v1`, "ada@example.com", { resources: [`${h.base}/api/v1`] });
   const aud = [audienceOf(tokens.access_token)].flat();
   expect(aud).toContain(`${h.base}/api/v1`);
   expect(aud).not.toContain(`${h.base}/mcp`);

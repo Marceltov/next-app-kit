@@ -16,5 +16,5 @@ export {
   type SignInSettings,
 } from "./accounts.js";
 export { mailLanguage, renderMail, smtpMailer, type MailTexts, type Mailer, type SignInMail, type Smtp } from "./mail.js";
-export { personOf, type Person } from "./person.js";
+export { allowedPerson, personOf, stillAllowed, type Person } from "./person.js";
 export { apiResourceMetadataRoute, authServerMetadataRoute, clientNameFor, openIdConfigRoute, refusedSignIn, type RefusedSignIn } from "./routes.js";
