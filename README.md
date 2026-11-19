@@ -22,7 +22,7 @@ One entry point per part; only `next-app-kit/next` imports Next.js.
 Not on npm. Each [release](https://github.com/Marceltov/next-app-kit/releases) carries the package as `npm pack` makes it (`dist/` included; GitHub's archive of a tag has no `dist/`). Install it by its URL, with the peers at the versions the kit's `package.json` names; no git or SSH key is needed in CI, and the lockfile pins its hash:
 
 ```sh
-npm install https://github.com/Marceltov/next-app-kit/releases/download/v0.1.1/next-app-kit-0.1.1.tgz
+npm install https://github.com/Marceltov/next-app-kit/releases/download/v0.1.2/next-app-kit-0.1.2.tgz
 ```
 
 ## Settings
