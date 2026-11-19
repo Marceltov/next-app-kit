@@ -5,6 +5,7 @@ export {
   API_TOKEN_DAYS,
   API_TOKEN_RESOURCE,
   emailAllowed,
+  MAIL_NOT_SENT,
   openAuth,
   safeNext,
   signInFromEnv,

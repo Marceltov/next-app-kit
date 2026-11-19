@@ -96,6 +96,16 @@ const oauthSignIn = defineRequestState(() => false);
 export type Refusal = "email_not_verified" | "email_not_allowed";
 const refusal = defineRequestState((): Refusal | null => null);
 
+/**
+ * Whether the sign-in mail of this request went out. Better Auth awaits the mail but swallows its failure and answers `{success: true}`,
+ * so the page said "code sent" when nothing was: the send notes the failure here, and the after hook answers the request with an error
+ * instead (502 `MAIL_NOT_SENT`; 400 `EMAIL_SIGN_IN_OFF` when this instance mails nothing).
+ */
+const mailProblem = defineRequestState((): "failed" | "off" | null => null);
+
+/** What a sign-in page is told when its code was not mailed: `code` is what it tells the cases apart by. */
+export const MAIL_NOT_SENT = { status: 502, code: "MAIL_NOT_SENT", message: "The sign-in mail could not be sent" } as const;
+
 async function refuse(s: SignInSettings, why: Refusal, what: string): Promise<false> {
   await refusal.set(why).catch(() => {});
   s.log(
@@ -213,6 +223,11 @@ function options(s: SignInSettings, o: OpenAuthOptions, database: BetterSqlite3.
         }
       }),
       after: createAuthMiddleware(async (ctx) => {
+        if (ctx.path === "/email-otp/send-verification-otp") {
+          const problem = await stateOr(mailProblem, null);
+          if (problem === "failed") throw new APIError("BAD_GATEWAY", { message: MAIL_NOT_SENT.message, code: MAIL_NOT_SENT.code });
+          if (problem === "off") throw new APIError("BAD_REQUEST", { message: "Sign-in by email is off on this instance", code: "EMAIL_SIGN_IN_OFF" });
+        }
         // A session whose address is no longer on the list is no session: it is deleted when it shows up. (The list is read at start,
         // and openAuth sweeps such sessions then; this catches any that slipped past.)
         if (ctx.path === "/get-session") {
@@ -304,14 +319,20 @@ function options(s: SignInSettings, o: OpenAuthOptions, database: BetterSqlite3.
         storeOTP: "hashed",
         sendVerificationOTP: async ({ email, otp, type }: { email: string; otp: string; type: string }, ctx?: { request?: Request }) => {
           if (type !== "sign-in") return;
-          if (!mail) throw new APIError("BAD_REQUEST", { message: "Sign-in by email is off on this instance" });
+          if (!mail) return void (await mailProblem.set("off").catch(() => {}));
           // No mail to an address that may not sign in: nobody can use the app to send mail to strangers.
           if (!emailAllowed(s.allowed, email)) return;
           const headers = ctx?.request?.headers;
           // During an MCP or script sign-in (the sign-in page's signed query came along) the mail holds only the code: a link would sign
           // in whichever browser opens it, not the one the authorization waits in.
           const link = (await stateOr(oauthSignIn, false)) ? undefined : await signInLink(email, headers);
-          await mail({ to: email, code: otp, link, language: languageOf(headers) });
+          try {
+            await mail({ to: email, code: otp, link, language: languageOf(headers) });
+          } catch (e) {
+            // The error may name the address: only its code is logged.
+            s.log(`error: sign-in mail could not be sent (${(e as NodeJS.ErrnoException).code ?? "unknown"})`);
+            await mailProblem.set("failed").catch(() => {});
+          }
         },
       }),
       magicLink({

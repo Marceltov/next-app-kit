@@ -280,3 +280,50 @@ test("languageOfPicksTheMailLanguage", async () => {
   // A language the app has no texts in gets its first.
   expect(await send({ cookie: "lang=fr" })).toBe("en");
 });
+
+test("mailFailureIsAnError: a sign-in mail that could not be sent is not answered as sent", async () => {
+  // Better Auth awaits the mail but swallows its failure and answers success, so the page said "code sent" when nothing went out.
+  const logs: string[] = [];
+  let failing = true;
+  const settings = {
+    ...h.settings,
+    file: join(freshDir("mailfail"), "auth.sqlite"),
+    log: (l: string) => void logs.push(l),
+    mailer: async () => {
+      if (failing) throw Object.assign(new Error("connect ECONNREFUSED for ada@example.com"), { code: "ECONNREFUSED" });
+    },
+  };
+  const auth = await openAuth(settings, { apiTokenPrefix: API_TOKEN_PREFIX, texts: TEXTS });
+  const send = (email = "ada@example.com") =>
+    auth.handler(
+      new Request(`${h.base}/api/auth/email-otp/send-verification-otp`, {
+        method: "POST",
+        headers: { "content-type": "application/json", origin: h.base },
+        body: JSON.stringify({ email, type: "sign-in" }),
+      }),
+    );
+  const r = await send();
+  expect(r.status).toBe(502);
+  expect(await r.json()).toMatchObject({ code: "MAIL_NOT_SENT", message: "The sign-in mail could not be sent" });
+  // Logged at error level, without the address.
+  expect(logs.filter((l) => l.startsWith("error: sign-in mail could not be sent"))).toHaveLength(1);
+  expect(logs.join("\n")).not.toContain("ada@example.com");
+  // An address that may not sign in still gets the same answer as one that may: nothing was to be sent, so nothing failed.
+  expect((await send("eve@elsewhere.example")).status).toBe(200);
+  failing = false;
+  expect((await send()).status).toBe(200);
+  // An instance that mails nothing says so, too, rather than "sent".
+  const silent = await openAuth(
+    { ...settings, file: join(freshDir("nomail"), "auth.sqlite"), mailer: undefined, smtp: null },
+    { apiTokenPrefix: API_TOKEN_PREFIX, texts: TEXTS },
+  );
+  const off = await silent.handler(
+    new Request(`${h.base}/api/auth/email-otp/send-verification-otp`, {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: h.base },
+      body: JSON.stringify({ email: "ada@example.com", type: "sign-in" }),
+    }),
+  );
+  expect(off.status).toBe(400);
+  expect(await off.json()).toMatchObject({ code: "EMAIL_SIGN_IN_OFF" });
+});
