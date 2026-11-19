@@ -227,3 +227,51 @@ test("tokensOnTheRoute", async () => {
   const { tokens } = await oauthFor(h, `${h.base}/mcp`, "ada@example.com");
   expect((await viaToken("GET", "/things", tokens.access_token)).status).toBe(401);
 });
+
+const op = (method: Op<Ctx>["method"], path: string, id: string, errors: number[] = [401]): Op<Ctx> => ({
+  method,
+  path,
+  operationId: id,
+  noTool: "test fixture",
+  summary: id,
+  tag: "Things",
+  params: Object.fromEntries([...path.matchAll(/\{(\w+)\}/g)].map((m) => [m[1]!, "a parameter"])),
+  ok: { status: 200, description: "ok" },
+  errors,
+  handle: ({ params }) => ({ status: 200, body: { id, params } }),
+});
+
+test("conflict409: fail(409, …) answers {error, code: conflict}, and openApiDocument accepts 409 in errors", async () => {
+  expect(fail(409, "it changed")).toEqual({ status: 409, body: { error: "it changed", code: "conflict" } });
+  const doc = openApiDocument([op("PUT", "/x/{id}", "putX", [401, 409])], { title: "T", version: "1", serverUrl: BASE }) as {
+    paths: Record<string, Record<string, { responses: Record<string, { description: string }> }>>;
+  };
+  expect(doc.paths["/x/{id}"]!.put!.responses["409"]!.description).toContain("`conflict`");
+});
+
+test("literalPathsWin: /x/export and /x/{id} each reach their own operation, in either order", async () => {
+  const byParam = op("GET", "/x/{id}", "getX");
+  const literal = op("GET", "/x/export", "exportX");
+  for (const table of [
+    [byParam, literal],
+    [literal, byParam],
+  ]) {
+    const run = (path: string) => restRoute(req("GET", path), table, { things: [] }, WRITER, SETTINGS).then((r) => r.json());
+    expect(await run("/x/export")).toEqual({ id: "exportX", params: {} });
+    expect(await run("/x/abc")).toEqual({ id: "getX", params: { id: "abc" } });
+  }
+  // The literal route has only GET; a POST to it is the parameter route's own business, not a 405 for the literal one.
+  const post = op("POST", "/x/{id}", "postX");
+  const r = await restRoute(req("POST", "/x/export", "{}"), [literal, post], { things: [] }, WRITER, SETTINGS);
+  expect(await r.json()).toEqual({ id: "postX", params: { id: "export" } });
+});
+
+test("a 405 and a 500 are never cached", async () => {
+  const wrong = await call("DELETE", "/things", WRITER);
+  expect(wrong.status).toBe(405);
+  expect(wrong.headers.get("cache-control")).toBe("no-store");
+  const broken: Op<Ctx> = { ...OPS[0]!, handle: () => Promise.reject(new Error("disk full")) };
+  const r = await restRoute(req("GET", "/things"), [broken], { things: [] }, WRITER, SETTINGS);
+  expect(r.status).toBe(500);
+  expect(r.headers.get("cache-control")).toBe("no-store");
+});

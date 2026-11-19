@@ -63,25 +63,26 @@ const ERRORS: Record<number, [string, string]> = {
   401: ["unauthorized", "No valid API token or OAuth access token for this API"],
   403: ["forbidden", "The token's scope is `read`, and this changes something"],
   404: ["not_found", "No such thing"],
+  409: ["conflict", "The request conflicts with the current state of the thing, such as a name that is taken"],
   413: ["too_large", "The request body is larger than 256 KiB"],
 };
 
-/** A refusal as every error is answered: `{error, code}`, the code from the status. The message is English and never holds a token. */
+/** A refusal as every error is answered: `{error, code}`, the code from the status. The message is English and never holds a token. A handler
+ * that throws is answered 500 and its message is logged through `settings.log`, so an error message must not carry a secret either. */
 export const fail = (status: number, error: string): Reply => ({ status, body: { error, code: ERRORS[status]?.[0] ?? "internal" } });
 
-function match<Ctx>(ops: Op<Ctx>[], segments: string[]): { ops: Op<Ctx>[]; params: Record<string, string> } | null {
-  const found: Op<Ctx>[] = [];
-  let params: Record<string, string> = {};
-  for (const o of ops) {
-    const tpl = o.path.slice(1).split("/");
+/** Every operation whose path fits, each with its own path parameters, the one with the most literal segments first: `/x/export` wins over `/x/{id}`. */
+function match<Ctx>(ops: Op<Ctx>[], segments: string[]): { op: Op<Ctx>; params: Record<string, string> }[] {
+  const found: { op: Op<Ctx>; params: Record<string, string>; literals: number }[] = [];
+  for (const op of ops) {
+    const tpl = op.path.slice(1).split("/");
     if (tpl.length !== segments.length) continue;
-    const p: Record<string, string> = {};
-    if (tpl.every((t, i) => (t.startsWith("{") ? ((p[t.slice(1, -1)] = segments[i]!), true) : t === segments[i]))) {
-      found.push(o);
-      params = p;
-    }
+    const params: Record<string, string> = {};
+    let literals = 0;
+    if (tpl.every((t, i) => (t.startsWith("{") ? ((params[t.slice(1, -1)] = segments[i]!), true) : t === segments[i] && ++literals)))
+      found.push({ op, params, literals });
   }
-  return found.length ? { ops: found, params } : null;
+  return found.sort((x, y) => y.literals - x.literals);
 }
 
 const complaint = (error: z.ZodError) => z.prettifyError(error).replace(/\s+/g, " ").replace(/^✖ /, "");
@@ -136,15 +137,16 @@ export async function restRoute<Ctx>(req: Request, ops: Op<Ctx>[], ctx: Ctx, cal
       ? new Response(null, { status: r.status })
       : Response.json(r.body, { status: r.status, headers: { "cache-control": "no-store", ...(r.status === 401 ? challenge : {}) } }));
   if (!caller) return send(fail(401, "an API token or an access token for this API is needed"));
-  const m = segments && match(ops, segments);
-  if (!m) return send(fail(404, "no such endpoint"));
+  const candidates = segments ? match(ops, segments) : [];
+  if (!candidates.length) return send(fail(404, "no such endpoint"));
   const method = req.method === "HEAD" ? "GET" : req.method;
-  const op = m.ops.find((o) => o.method === method);
-  if (!op)
+  const found = candidates.find((c) => c.op.method === method);
+  if (!found)
     return Response.json(
       { error: "method not allowed", code: "method_not_allowed" },
-      { status: 405, headers: { Allow: m.ops.map((o) => o.method).join(", ") } },
+      { status: 405, headers: { Allow: [...new Set(candidates.map((c) => c.op.method))].join(", "), "cache-control": "no-store" } },
     );
+  const { op } = found;
   if (op.method !== "GET" && caller.scope !== "read+write") return send(fail(403, "this token may only read"));
   let query: Record<string, unknown> = {};
   if (op.query) {
@@ -161,7 +163,7 @@ export async function restRoute<Ctx>(req: Request, ops: Op<Ctx>[], ctx: Ctx, cal
   }
   let params: Record<string, string>;
   try {
-    params = Object.fromEntries(Object.entries(m.params).map(([k, v]) => [k, decodeURIComponent(v)]));
+    params = Object.fromEntries(Object.entries(found.params).map(([k, v]) => [k, decodeURIComponent(v)]));
   } catch {
     return send(fail(400, "a path parameter is not valid percent-encoding"));
   }
@@ -169,7 +171,7 @@ export async function restRoute<Ctx>(req: Request, ops: Op<Ctx>[], ctx: Ctx, cal
     return send(await op.handle({ ctx, base, caller, params, query, body }));
   } catch (e) {
     settings.log(`api ${op.operationId}: ${(e as Error).message}`);
-    return Response.json({ error: "internal error", code: "internal" }, { status: 500 });
+    return Response.json({ error: "internal error", code: "internal" }, { status: 500, headers: { "cache-control": "no-store" } });
   }
 }
 
