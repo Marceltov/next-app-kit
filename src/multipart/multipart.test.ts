@@ -1,10 +1,16 @@
 // Multipart uploads, moved from noticebox (its multipart tests, generalised from forms to maxFileBytes / maxFiles / types) plus what an
 // upload from a phone needs: a file over its size is cut off as it arrives and answers 413, and an aborted request leaves no temp file.
-import { mkdtempSync, readdirSync, readFileSync } from "node:fs";
+import { createWriteStream, mkdtempSync, readdirSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, test, vi } from "vitest";
 import { MultipartError, readMultipart, safeName } from "./index.js";
+
+// Every file the reader writes is counted, so a test can see that none is opened after a refusal.
+vi.mock("node:fs", async (original) => {
+  const fs = await original<typeof import("node:fs")>();
+  return { ...fs, createWriteStream: vi.fn(fs.createWriteStream) };
+});
 
 const uploads = () => mkdtempSync(join(process.env.DATA_DIR!, "multipart-"));
 const file = (name: string, bytes: number | Uint8Array, type = "application/octet-stream") =>
@@ -246,6 +252,17 @@ test("everyRefusalCarriesItsCode: an app tells refusals apart by code, never by 
     "not_multipart",
   ]);
   expect(await codeOf(new Request("http://test.invalid/upload", { method: "POST" }))).toEqual([400, "not_multipart"]);
+  // Chunked (no content-length), and more than the whole post may be in one go: too large, not "aborted" (the cap tearing the body down is
+  // no broken connection).
+  const chunked = new ReadableStream<Uint8Array>({
+    start(c) {
+      c.enqueue(head("photo"));
+      c.enqueue(new Uint8Array(2 * 1024 * 1024).fill(7));
+    },
+  });
+  expect(
+    await codeOf(new Request("http://test.invalid/upload", { method: "POST", body: chunked, headers: multipartHeaders, duplex: "half" } as RequestInit)),
+  ).toEqual([413, "too_large"]);
   expect(readdirSync(dir)).toEqual([]);
 });
 
@@ -269,3 +286,23 @@ test("refusedFileDoesNotStall: a file refused as it starts answers at once, even
   }
   expect(readdirSync(dir)).toEqual([]);
 }, 60_000);
+
+test("noWriteAfterRefusal: once a post is refused, a file that follows in the same chunk is never opened", async () => {
+  const dir = uploads();
+  const opened = vi.mocked(createWriteStream);
+  opened.mockClear();
+  const wrongFirst = await post({}, [
+    ["photo", file("a.heic", 5, "image/heic")],
+    ["photo", file("b.jpg", 5, "image/jpeg")],
+  ]);
+  expect((await refused(readMultipart(wrongFirst, { maxFileBytes: 100, maxFiles: 2, tmpDir: dir, types: ["image/jpeg"] }))).code).toBe("wrong_type");
+  const tooMany = await post({}, [
+    ["photo", file("a.jpg", 5, "image/jpeg")],
+    ["photo", file("b.jpg", 5, "image/jpeg")],
+    ["photo", file("c.jpg", 5, "image/jpeg")],
+  ]);
+  expect((await refused(readMultipart(tooMany, { maxFileBytes: 100, maxFiles: 1, tmpDir: dir }))).code).toBe("too_many");
+  // a.jpg of the second post is the only file ever opened.
+  expect(opened).toHaveBeenCalledTimes(1);
+  expect(readdirSync(dir)).toEqual([]);
+});

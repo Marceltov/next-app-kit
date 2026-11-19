@@ -112,8 +112,9 @@ export async function readMultipart(req: Request, opts: MultipartOptions): Promi
     });
   };
   const onAbort = () => stop(new MultipartError("aborted", "the request was aborted"));
-  // The body itself failing (the connection dropped) is an abort too; busboy would only call the cut-off rest "not a form".
-  source.once("error", onAbort);
+  // The body itself failing (the connection dropped) is an abort too; busboy would only call the cut-off rest "not a form". But the body
+  // torn down by our own cap (`total`, on a chunked post) fails with that MultipartError, and that one is the answer: too large, not aborted.
+  source.once("error", (e) => stop(e instanceof MultipartError ? e : new MultipartError("aborted", "the request was aborted")));
   req.signal.addEventListener("abort", onAbort, { once: true });
   // A signal that was aborted before the listener came fires no event: the request is over already.
   if (req.signal.aborted) onAbort();
@@ -127,6 +128,8 @@ export async function readMultipart(req: Request, opts: MultipartOptions): Promi
   bb.on("partsLimit", () => stop(new MultipartError("too_many", "the form has too many parts")));
   bb.on("fieldsLimit", () => stop(new MultipartError("too_many", "the form has too many fields")));
   bb.on("file", (field, stream, info) => {
+    // Refused already: busboy may still hand over a file that was in the same chunk before it is torn down; it is never written.
+    if (failure) return void stream.resume();
     // A file input left empty still sends a part, without a name and without bytes: that is no file, and never refused.
     if (!info.filename) return void stream.resume();
     const name = safeName(info.filename);
