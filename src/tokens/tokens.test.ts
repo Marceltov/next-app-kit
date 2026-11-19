@@ -88,7 +88,7 @@ test("readCannotWrite", async () => {
 });
 
 test("apiTokenRefusedOnMcp", async () => {
-  // The /mcp check (Task 5 wires it into the route) takes only an access token issued for /mcp: an API token is none.
+  // The /mcp check takes only an access token issued for /mcp: an API token is none (and through mcpRoute: ../mcp/mcp.test.ts).
   const write = await tokenFor(me);
   let reached = false;
   const gate = requireMcpAuth(
