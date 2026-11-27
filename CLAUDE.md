@@ -32,7 +32,7 @@ Dependabot (`.github/dependabot.yml`) opens weekly grouped bumps; patch and mino
 
 ## Architecture
 
-- One entry point per part (`next-app-kit/signin`, `/tokens`, `/mcp`, `/rest`, `/multipart`, `/migrations`, `/next`, `/testing`), each `src/<part>/index.ts` built to `dist/<part>/index.js`; a part's `exports` entry is added with the part (`src/package.test.ts` checks every entry has a built file).
+- One entry point per part (`next-app-kit/signin`, `/tokens`, `/mcp`, `/rest`, `/multipart`, `/files`, `/migrations`, `/next`, `/testing`), each `src/<part>/index.ts` built to `dist/<part>/index.js`; a part's `exports` entry is added with the part (`src/package.test.ts` checks every entry has a built file).
 - Framework-free core: only `src/next/` imports Next.js (`eslint.config.mjs`, pinned by `src/boundary.test.ts`); its handlers and `next-app-kit/testing`'s are plain `(Request) => Response`.
 - `next-app-kit/testing` is imported by an app's production code (its test sign-in route file): it imports no test runner, and `testSignInRoute` returns no handler under `NODE_ENV=production`.
 - Migrations: the kit holds the runner (`migrate`); apps keep their list in `backend/db/migrations.ts` and run it with `migrate`.

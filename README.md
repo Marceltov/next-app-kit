@@ -12,7 +12,8 @@ One entry point per part; only `next-app-kit/next` imports Next.js.
 | `next-app-kit/tokens`     | API tokens, hashed, scoped `read` or `read+write`, 90 days by default and at most 365 (`createApiToken`, `listApiTokens`, `revokeApiToken`, `restCaller`)                                                                                        |
 | `next-app-kit/mcp`        | The MCP endpoint (Streamable HTTP, POST only): origin and token checks, tools whose results carry `guidance: string[]`, connected clients (`defineTool`, `refuse`, `mcpRoute`, `connections`, `revokeConnection`)                                |
 | `next-app-kit/rest`       | The REST route table under `/api/v1` and its OpenAPI document; every operation mirrors a tool or names why not (`Op`, `fail`, `restRoute`, `openApiDocument`, `checkOpsMirrorTools`)                                                             |
-| `next-app-kit/multipart`  | Multipart uploads into a temporary folder, with limits (`readMultipart`, `MultipartError`)                                                                                                                                                       |
+| `next-app-kit/multipart`  | Multipart uploads into a temporary folder, each file field by its own rule, every problem listed (`readMultipart`, `MultipartError`)                                                                                                             |
+| `next-app-kit/files`      | Files of an app's records, stored in chunks in the app's SQLite and served safely (`FileStore`, `fileRoute`, `signedFileUrl`)                                                                                                                    |
 | `next-app-kit/migrations` | The migrations runner (`migrate`)                                                                                                                                                                                                                |
 | `next-app-kit/next`       | The route handlers (`authHandler`, `wellKnownHandlers`, `mcpHandler`, `restHandler`)                                                                                                                                                             |
 | `next-app-kit/testing`    | Signing in for tests and end-to-end runs, calling a tool, checking the peers (`freshAuth`, `signedInCookie`, `testSignInRoute`, `callTool`, `checkPeers`)                                                                                        |
@@ -161,15 +162,32 @@ npm run build && cd examples/minimal && npm ci && npm run test:peers && npm run 
 
 ## Multipart uploads
 
-`readMultipart(req, { maxFileBytes, maxFiles, types?, tmpDir? })` from `next-app-kit/multipart` leaves each file in a temporary folder and throws a `MultipartError` carrying the status to answer with and a `code` saying which problem it is: `too_large` (413: a file over `maxFileBytes`, or the post or its text fields too large), `wrong_type` (a file not in `types`), `too_many` (more files than `maxFiles`, or too many fields or parts), `empty` (a file without bytes), `not_multipart` (the body is no multipart form) and `aborted` (the request broke off or was aborted before its end), all 400 but the first. A chunked post that grows past what the limits allow is `too_large` too, and once a post is refused no further file of it is written. An app words its answer by the code; the English message is for its log. The folder is removed on every failure; after a success it is the app's to remove, so call `cleanup()` in a `finally`:
+`readMultipart(req, { files, strict?, fieldBytes?, tmpDir? })` from `next-app-kit/multipart` reads a post with a rule for each file field (`{ label?, types?, maxFiles, maxFileBytes, required? }`; `types` are media types, `image/*` or extensions like `.stl`) and leaves each file in a temporary folder. What is wrong with the files comes back as `problems`, every field at once, each with its `field`, a `code` (`unexpected_field` when `strict` and a file comes for a field without a rule, `too_many`, `wrong_type`, `too_large`, `empty`, `required`) and an English `message` in the field's label, so a form can say all that is wrong in one go. A file of the wrong kind is passed over and the rest read; one file too many, or a file growing past its field's size, stops the post there with the rest never read.
+
+What is wrong with the post as a whole is thrown as a `MultipartError` carrying the status to answer with and its `code`: `too_large` (413: the post past `multipartLimit(opts)`, every file field full plus the text fields, declared or as it arrives, or its text fields past `fieldBytes`, 1 MB by default), `too_many` (too many fields or parts), `not_multipart` and `aborted` (the request broke off or was aborted before its end), all 400 but the first. The folder is removed on every failure; otherwise it is the app's to remove, so call `cleanup()` in a `finally`:
 
 ```ts
-const upload = await readMultipart(req, { maxFileBytes: 20 * 1024 * 1024, maxFiles: 10, types: ["image/*"] });
+const upload = await readMultipart(req, { files: { photo: { label: "Photo", types: ["image/*"], maxFiles: 3, maxFileBytes: 10 * 1024 * 1024 } } });
 try {
+  if (upload.problems.length) return Response.json({ errors: upload.problems.map((p) => p.message) }, { status: 400 });
   // move or read upload.files
 } finally {
   await upload.cleanup();
 }
+```
+
+## Files
+
+`next-app-kit/files` keeps the files that belong to a record (a form's submission, an order) in the app's own database. The tables are the app's: its own migration makes them as `FILES_SCHEMA` says (the kit ships none). Then `new FileStore(db)` on the same `better-sqlite3` connection. Its calls are synchronous, so `add(owner, files)` (the files `readMultipart` left, or bytes) runs inside the transaction that writes the owner, and `remove(owners, { keep? })` inside the one that removes it (`keep` names fields whose files stay). Bytes are kept in 1 MB chunks and read back one at a time.
+
+`fileResponse(store, file, { inline? })` serves one as a download (`application/octet-stream`, `nosniff`, a sandboxing CSP); only PNG, JPEG, GIF, WebP and AVIF are shown inline when asked, never SVG. `signedFileUrl({ secret, purpose, now }, url, id, minutes)` makes a link that works without signing in until it runs out, and `signedFor` checks one: how an MCP tool gives a file out without its bytes passing through the model.
+
+`fileRoute(req, id, { store, signer, allow })` is the whole download route: a signed link that holds, or a request `allow` lets through (usually: someone is signed in), gets the file, `?inline=1` to show a picture. A bad link is 403 and a refused request 401, both before the file is looked up; then 404. Who may have files at all stays the app's, in `allow`:
+
+```ts
+// app/files/[id]/route.ts
+export const GET = async (req: Request, { params }: { params: Promise<{ id: string }> }) =>
+  fileRoute(req, (await params).id, { store: files, signer, allow: async (req) => Boolean(await session(req)) });
 ```
 
 ## Decisions
