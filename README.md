@@ -13,6 +13,7 @@ One entry point per part; only `next-app-kit/next` imports Next.js.
 | `next-app-kit/mcp`        | The MCP endpoint (Streamable HTTP, POST only): origin and token checks, tools whose results carry `guidance: string[]`, connected clients (`defineTool`, `refuse`, `mcpRoute`, `connections`, `revokeConnection`)                                |
 | `next-app-kit/rest`       | The REST route table under `/api/v1` and its OpenAPI document; every operation mirrors a tool or names why not (`Op`, `fail`, `restRoute`, `openApiDocument`, `checkOpsMirrorTools`)                                                             |
 | `next-app-kit/multipart`  | Multipart uploads into a temporary folder, with limits (`readMultipart`, `MultipartError`)                                                                                                                                                       |
+| `next-app-kit/files`      | Files of an app's records: a form's post read by each field's rule, stored in chunks in the app's SQLite, served safely (`readUpload`, `FileStore`, `fileResponse`, `signedFileUrl`)                                                             |
 | `next-app-kit/migrations` | The migrations runner (`migrate`)                                                                                                                                                                                                                |
 | `next-app-kit/next`       | The route handlers (`authHandler`, `wellKnownHandlers`, `mcpHandler`, `restHandler`)                                                                                                                                                             |
 | `next-app-kit/testing`    | Signing in for tests and end-to-end runs, calling a tool, checking the peers (`freshAuth`, `signedInCookie`, `testSignInRoute`, `callTool`, `checkPeers`)                                                                                        |
@@ -167,6 +168,31 @@ npm run build && cd examples/minimal && npm ci && npm run test:peers && npm run 
 const upload = await readMultipart(req, { maxFileBytes: 20 * 1024 * 1024, maxFiles: 10, types: ["image/*"] });
 try {
   // move or read upload.files
+} finally {
+  await upload.cleanup();
+}
+```
+
+## Files
+
+`next-app-kit/files` is for files that belong to a record (a form's submission, an order): what `readMultipart` takes for one rule, `readUpload(req, { rules, limit, strict?, tmpDir? })` takes per file field (`{ label, accept, maxFiles, maxBytes, required? }`) and answers with every problem at once, each with its field, a `code` (`not_a_file_field`, `too_many`, `wrong_type`, `too_large`, `empty`, `required`) and an English `message` in the field's label; `"too large"` when the post passes `limit`, `"not a form"` when it can't be read. Nothing is stored until the app has the whole answer.
+
+`FileStore` keeps the files in the app's own database: append `filesMigration` to the app's migrations, then `new FileStore(db)` on the same `better-sqlite3` connection. Its calls are synchronous, so `add(owner, files)` runs inside the transaction that writes the owner, and `remove(owners, { keep? })` inside the one that removes it (`keep` names fields whose files stay). Bytes are kept in 1 MB chunks and read back one at a time.
+
+`fileResponse(store, file, { inline? })` serves one as a download (`application/octet-stream`, `nosniff`, a sandboxing CSP); only PNG, JPEG, GIF, WebP and AVIF are shown inline when asked, never SVG. `signedFileUrl({ secret, purpose, now }, url, id, minutes)` makes a link that works without signing in until it runs out, and `signedFor` checks one: how an MCP tool gives a file out without its bytes passing through the model.
+
+```ts
+const upload = await readUpload(req, {
+  rules: { photo: { label: "Photo", accept: ["image/*"], maxFiles: 3, maxBytes: 10 * 1024 * 1024 } },
+  limit: 50 * 1024 * 1024,
+});
+if (typeof upload === "string") return new Response(upload, { status: upload === "too large" ? 413 : 400 });
+try {
+  if (upload.problems.length) return Response.json({ errors: upload.problems.map((p) => p.message) }, { status: 400 });
+  db.transaction(() => {
+    const id = insertRecord(upload.fields);
+    files.add(id, upload.files);
+  })();
 } finally {
   await upload.cleanup();
 }
