@@ -5,7 +5,7 @@ import { join } from "node:path";
 import BetterSqlite3 from "better-sqlite3";
 import { describe, expect, test } from "vitest";
 import { readMultipart } from "../multipart/index.js";
-import { CHUNK_BYTES, FILES_SCHEMA, FileStore, fileResponse, signedFileUrl, signedFor } from "./index.js";
+import { CHUNK_BYTES, FILES_SCHEMA, FileStore, fileResponse, fileRoute, signedFileUrl, signedFor } from "./index.js";
 
 const tmp = () => mkdtempSync(join(process.env.DATA_DIR!, "files-"));
 const file = (name: string, bytes: number, type = "application/octet-stream") => new File([new Uint8Array(bytes).fill(7)], name, { type });
@@ -102,5 +102,28 @@ describe("serving", () => {
     expect(signedFor(signer(), "abd", params)).toBe(false);
     expect(signedFor({ ...signer(), purpose: "another app" }, "abc", params)).toBe(false);
     expect(signedFor(signer(new Date("2026-11-27T10:15:01Z")), "abc", params)).toBe(false);
+  });
+  test("the download route: a signed link, or a request the app allows; neither a refused nor a bad link learns whether the file exists", async () => {
+    const { files } = store();
+    const [png] = files.add("s1", [{ field: "f", name: "a.png", type: "image/png", data: new Uint8Array([1, 2]) }]);
+    let signedIn = false;
+    const opts = { store: files, signer: signer(), allow: async (req: Request) => signedIn && req.headers.get("cookie") === "s=1" };
+    const get = (url: string, id = png!.id, headers: Record<string, string> = {}) => fileRoute(new Request(url, { headers }), id, opts);
+    const link = signedFileUrl(signer(), `https://app.test/files/${png!.id}?inline=1`, png!.id, 15).url;
+
+    const shown = await get(link);
+    expect(shown.status).toBe(200);
+    expect(shown.headers.get("content-type")).toBe("image/png");
+    expect((await get(link, "another")).status).toBe(403);
+    expect((await get(link.replace(/sig=[^&]+/, "sig=x"))).status).toBe(403);
+    expect((await fileRoute(new Request(link), png!.id, { ...opts, signer: signer(new Date("2026-11-27T10:15:01Z")) })).status).toBe(403);
+
+    expect((await get(`https://app.test/files/${png!.id}`)).status).toBe(401);
+    expect((await get("https://app.test/files/nope", "nope")).status).toBe(401);
+    signedIn = true;
+    const dl = await get(`https://app.test/files/${png!.id}`, png!.id, { cookie: "s=1" });
+    expect(dl.status).toBe(200);
+    expect(dl.headers.get("content-disposition")).toMatch(/^attachment;/);
+    expect((await get("https://app.test/files/nope", "nope", { cookie: "s=1" })).status).toBe(404);
   });
 });

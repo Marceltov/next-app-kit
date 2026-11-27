@@ -13,7 +13,7 @@ One entry point per part; only `next-app-kit/next` imports Next.js.
 | `next-app-kit/mcp`        | The MCP endpoint (Streamable HTTP, POST only): origin and token checks, tools whose results carry `guidance: string[]`, connected clients (`defineTool`, `refuse`, `mcpRoute`, `connections`, `revokeConnection`)                                |
 | `next-app-kit/rest`       | The REST route table under `/api/v1` and its OpenAPI document; every operation mirrors a tool or names why not (`Op`, `fail`, `restRoute`, `openApiDocument`, `checkOpsMirrorTools`)                                                             |
 | `next-app-kit/multipart`  | Multipart uploads into a temporary folder, each file field by its own rule, every problem listed (`readMultipart`, `MultipartError`)                                                                                                             |
-| `next-app-kit/files`      | Files of an app's records, stored in chunks in the app's SQLite and served safely (`FileStore`, `fileResponse`, `signedFileUrl`)                                                                                                                 |
+| `next-app-kit/files`      | Files of an app's records, stored in chunks in the app's SQLite and served safely (`FileStore`, `fileRoute`, `signedFileUrl`)                                                                                                                    |
 | `next-app-kit/migrations` | The migrations runner (`migrate`)                                                                                                                                                                                                                |
 | `next-app-kit/next`       | The route handlers (`authHandler`, `wellKnownHandlers`, `mcpHandler`, `restHandler`)                                                                                                                                                             |
 | `next-app-kit/testing`    | Signing in for tests and end-to-end runs, calling a tool, checking the peers (`freshAuth`, `signedInCookie`, `testSignInRoute`, `callTool`, `checkPeers`)                                                                                        |
@@ -181,6 +181,14 @@ try {
 `next-app-kit/files` keeps the files that belong to a record (a form's submission, an order) in the app's own database. The tables are the app's: its own migration makes them as `FILES_SCHEMA` says (the kit ships none). Then `new FileStore(db)` on the same `better-sqlite3` connection. Its calls are synchronous, so `add(owner, files)` (the files `readMultipart` left, or bytes) runs inside the transaction that writes the owner, and `remove(owners, { keep? })` inside the one that removes it (`keep` names fields whose files stay). Bytes are kept in 1 MB chunks and read back one at a time.
 
 `fileResponse(store, file, { inline? })` serves one as a download (`application/octet-stream`, `nosniff`, a sandboxing CSP); only PNG, JPEG, GIF, WebP and AVIF are shown inline when asked, never SVG. `signedFileUrl({ secret, purpose, now }, url, id, minutes)` makes a link that works without signing in until it runs out, and `signedFor` checks one: how an MCP tool gives a file out without its bytes passing through the model.
+
+`fileRoute(req, id, { store, signer, allow })` is the whole download route: a signed link that holds, or a request `allow` lets through (usually: someone is signed in), gets the file, `?inline=1` to show a picture. A bad link is 403 and a refused request 401, both before the file is looked up; then 404. Who may have files at all stays the app's, in `allow`:
+
+```ts
+// app/files/[id]/route.ts
+export const GET = async (req: Request, { params }: { params: Promise<{ id: string }> }) =>
+  fileRoute(req, (await params).id, { store: files, signer, allow: async (req) => Boolean(await session(req)) });
+```
 
 ## Decisions
 

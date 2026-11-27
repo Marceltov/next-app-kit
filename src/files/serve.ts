@@ -65,3 +65,25 @@ export function signedFor(s: LinkSigner, id: string, params: URLSearchParams): b
   const got = Buffer.from(sig);
   return got.length === want.length && timingSafeEqual(got, want);
 }
+
+/** What the download route needs from the app: its files, its link signer, and who may have a file without a signed link. */
+export type FileRouteOptions = {
+  store: FileStore;
+  signer: LinkSigner;
+  /** Whether this request may have the app's files without a signed link: usually, whether someone is signed in. */
+  allow: (req: Request) => boolean | Promise<boolean>;
+};
+
+/**
+ * GET of one file (`id` from the route's path): for whoever holds a signed link to it that has not run out, or for a request `allow`
+ * lets through. `?inline=1` asks to show a picture. A link that does not hold is 403, a request without one that `allow` refuses 401,
+ * both before the file is looked up, so neither learns whether it exists; then 404 for a file there is not.
+ */
+export async function fileRoute(req: Request, id: string, opts: FileRouteOptions): Promise<Response> {
+  const params = new URL(req.url).searchParams;
+  if (params.has("sig")) {
+    if (!signedFor(opts.signer, id, params)) return new Response("this link has run out or is not valid; ask for a new one", { status: 403 });
+  } else if (!(await opts.allow(req))) return new Response("sign in first", { status: 401 });
+  const f = opts.store.get(id);
+  return f ? fileResponse(opts.store, f, { inline: params.get("inline") === "1" }) : new Response("no such file", { status: 404 });
+}
