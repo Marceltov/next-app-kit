@@ -2,15 +2,13 @@
 // with its owner (the record it came with, in the app's own words: a submission, an order), its field, name, media type and size, and
 // its bytes in chunks of a megabyte, so neither writing nor reading a large file holds it in memory whole. The app writes a record's
 // files in the same transaction as the record (the store's calls are synchronous and run on the app's own connection), and removes them
-// with it. The tables come as a migration the app appends to its own list (`filesMigration`, next-app-kit/migrations).
+// with it. The tables are the app's, made by its own migrations (apps keep their schema; the kit only runs them): `FILES_SCHEMA` is what
+// they must come to.
 import { closeSync, openSync, readSync } from "node:fs";
 import { randomBytes } from "node:crypto";
-import type { Migration } from "../migrations/index.js";
 
-/** The tables the store uses: append it to the app's migrations once. */
-export const filesMigration: Migration = {
-  name: "files",
-  sql: `
+/** The tables FileStore reads and writes, as an app's migration makes them (an app may add a foreign key on `owner` to its records). */
+export const FILES_SCHEMA = `
 create table files (
   id text primary key,
   owner text not null,
@@ -26,8 +24,7 @@ create table file_chunks (
   data blob not null,
   primary key (file_id, seq)
 ) without rowid;
-`,
-};
+`;
 
 /** How large the chunks of a file are in the database. */
 export const CHUNK_BYTES = 1024 * 1024;
@@ -35,7 +32,7 @@ export const CHUNK_BYTES = 1024 * 1024;
 /** A stored file, without its bytes. */
 export type StoredFile = { id: string; owner: string; field: string; name: string; type: string; size: number };
 
-/** A file to store: its bytes, or the temporary file that holds them (readUpload's files). */
+/** A file to store: its bytes, or the temporary file that holds them (next-app-kit/multipart's files). */
 export type NewFile = { field: string; name: string; type: string } & ({ data: Uint8Array } | { path: string; size: number });
 
 /** What the store needs of a connection: better-sqlite3 has it. */

@@ -1,12 +1,11 @@
-// next-app-kit/files, moved from noticebox with its cases: a form's post read by each file field's own rule with every problem listed at
-// once, files kept in chunks in the app's database and removed with their owner (or all but the fields an app keeps), and a stored file
-// served as a download unless it is a common photo, with a signed link that runs out.
-import { mkdtempSync, readdirSync } from "node:fs";
+// next-app-kit/files, moved from noticebox with its cases: files kept in chunks in the app's database and removed with their owner (or all
+// but the fields an app keeps), and a stored file served as a download unless it is a common photo, with a signed link that runs out.
+import { mkdtempSync } from "node:fs";
 import { join } from "node:path";
 import BetterSqlite3 from "better-sqlite3";
 import { describe, expect, test } from "vitest";
-import { migrate } from "../migrations/index.js";
-import { CHUNK_BYTES, FileStore, fileResponse, filesMigration, readUpload, signedFileUrl, signedFor, type FieldRule } from "./index.js";
+import { readMultipart } from "../multipart/index.js";
+import { CHUNK_BYTES, FILES_SCHEMA, FileStore, fileResponse, signedFileUrl, signedFor } from "./index.js";
 
 const tmp = () => mkdtempSync(join(process.env.DATA_DIR!, "files-"));
 const file = (name: string, bytes: number, type = "application/octet-stream") => new File([new Uint8Array(bytes).fill(7)], name, { type });
@@ -24,109 +23,20 @@ async function post(fields: Record<string, string>, files: [string, File][] = []
 }
 
 const MB = 1024 * 1024;
-const rules: Record<string, FieldRule> = {
-  model: { label: "Model", accept: [".stl", ".3mf"], maxFiles: 1, maxBytes: MB, required: true },
-  photos: { label: "Photos", accept: ["image/*"], maxFiles: 3, maxBytes: MB },
-};
-
-describe("readUpload", () => {
-  test("takes each field's files by its own rule, in order, and cleanup removes them", async () => {
-    const dir = tmp();
-    const u = await readUpload(
-      await post({ name: "Ada" }, [
-        ["model", file("Part.STL", 10)],
-        ["photos", file("a.jpg", 5, "image/jpeg")],
-        ["photos", file("b.png", 6, "image/png")],
-      ]),
-      { rules, limit: 10 * MB, tmpDir: dir },
-    );
-    if (typeof u === "string") throw new Error(u);
-    expect(u.problems).toEqual([]);
-    expect(u.fields).toEqual({ name: "Ada" });
-    expect(u.files.map((f) => [f.field, f.name, f.type, f.size])).toEqual([
-      ["model", "Part.STL", "application/octet-stream", 10],
-      ["photos", "a.jpg", "image/jpeg", 5],
-      ["photos", "b.png", "image/png", 6],
-    ]);
-    await u.cleanup();
-    expect(readdirSync(dir)).toEqual([]);
-  });
-
-  test("lists what is wrong with every field at once, in each field's label", async () => {
-    const u = await readUpload(
-      await post({}, [
-        ["photos", file("sketch.pdf", 5, "application/pdf")],
-        ["photos", file("empty.jpg", 0, "image/jpeg")],
-      ]),
-      {
-        rules,
-        limit: 10 * MB,
-        tmpDir: tmp(),
-      },
-    );
-    if (typeof u === "string") throw new Error(u);
-    expect(u.problems.map((p) => [p.field, p.code, p.message])).toEqual([
-      ["photos", "wrong_type", "Photos: sketch.pdf is not one of the accepted kinds (image/*)"],
-      ["photos", "empty", "Photos: empty.jpg is empty"],
-      ["model", "required", "Model is required"],
-    ]);
-  });
-
-  test("a file past its field's size or one too many stops the post there", async () => {
-    const big = await readUpload(await post({}, [["model", file("huge.stl", MB + 1)]]), { rules, limit: 10 * MB, tmpDir: tmp() });
-    if (typeof big === "string") throw new Error(big);
-    expect(big.problems.map((p) => p.message)).toEqual(["Model: huge.stl is larger than 1 MB"]);
-    const many = await readUpload(
-      await post({}, [
-        ["model", file("a.stl", 1)],
-        ["model", file("b.stl", 1)],
-      ]),
-      { rules, limit: 10 * MB, tmpDir: tmp() },
-    );
-    if (typeof many === "string") throw new Error(many);
-    expect(many.problems.map((p) => [p.code, p.message])).toEqual([["too_many", "Model: at most 1 file"]]);
-  });
-
-  test("a file for a field without a rule is a problem only when strict; an empty file input is no file", async () => {
-    const req = () =>
-      post({}, [
-        ["model", file("a.stl", 1)],
-        ["other", file("x.bin", 1)],
-        ["photos", new File([], "")],
-      ]);
-    const loose = await readUpload(await req(), { rules, limit: 10 * MB, tmpDir: tmp() });
-    const strict = await readUpload(await req(), { rules, limit: 10 * MB, tmpDir: tmp(), strict: true });
-    if (typeof loose === "string" || typeof strict === "string") throw new Error("not read");
-    expect(loose.problems).toEqual([]);
-    expect(strict.problems.map((p) => p.message)).toEqual(["other is not a file field of this form"]);
-  });
-
-  test("a post over the limit is too large and one that isn't multipart is not a form, with nothing left behind", async () => {
-    const dir = tmp();
-    expect(await readUpload(await post({}, [["model", file("a.stl", 2000)]]), { rules, limit: 1000, tmpDir: dir })).toBe("too large");
-    expect(
-      await readUpload(new Request("http://test.invalid/f", { method: "POST", body: "{}", headers: { "content-type": "application/json" } }), {
-        rules,
-        limit: 1000,
-        tmpDir: dir,
-      }),
-    ).toBe("not a form");
-    expect(readdirSync(dir)).toEqual([]);
-  });
-});
 
 function store() {
   const db = new BetterSqlite3(":memory:");
-  migrate(db, [filesMigration]);
+  db.exec(FILES_SCHEMA);
   return { db, files: new FileStore(db) };
 }
 
 describe("FileStore", () => {
   test("keeps a file in chunks, from memory or its temporary file, in the owner's order", async () => {
     const { files } = store();
-    const big = { model: { ...rules.model!, maxBytes: 2 * MB } };
-    const u = await readUpload(await post({}, [["model", file("a.stl", CHUNK_BYTES + 5)]]), { rules: big, limit: 10 * MB, tmpDir: tmp() });
-    if (typeof u === "string") throw new Error(u);
+    const u = await readMultipart(await post({}, [["model", file("a.stl", CHUNK_BYTES + 5)]]), {
+      files: { model: { maxFiles: 1, maxFileBytes: 2 * MB } },
+      tmpDir: tmp(),
+    });
     const [a] = files.add("s1", u.files);
     const [b] = files.add("s1", [{ field: "photos", name: "b.png", type: "image/png", data: new Uint8Array([1, 2, 3]) }]);
     await u.cleanup();
